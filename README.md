@@ -74,10 +74,17 @@ VLP-16의 `x/y/z/intensity/ring/time` 필드를 직접 처리하고, NaN·Inf, �
 
 ## 시연 영상
 
-| 영상 | 확인할 수 있는 동작 |
-|---|---|
-| [초기 자세 입력과 지역 정합](videos/localization_initial_pose_refinement.webm) | RViz에서 큰 방향 변화를 포함한 초기 자세를 입력한 뒤 현재 점군과 pose가 지도 구조에 맞춰지는 과정 |
-| [이동 중 pose 갱신과 재정렬](videos/localization_motion_and_realignment.webm) | 이동·회전 중 pose와 현재 점군이 계속 갱신되고, 일시적으로 벌어진 지도와의 기하 구조가 다시 가까워지는 과정 |
+### 초기 자세 입력과 지역 정합
+
+RViz에서 큰 방향 변화를 포함한 초기 자세를 입력한 뒤 현재 점군과 pose가 지도 구조에 맞춰지는 과정입니다.
+
+<video src="https://raw.githubusercontent.com/junseo5777/3D_SLAM/main/videos/localization_initial_pose_refinement.webm" controls width="900"></video>
+
+### 이동 중 pose 갱신과 재정렬
+
+이동·회전 중 pose와 현재 점군이 계속 갱신되고, 일시적으로 벌어진 지도와의 기하 구조가 다시 가까워지는 과정입니다.
+
+<video src="https://raw.githubusercontent.com/junseo5777/3D_SLAM/main/videos/localization_motion_and_realignment.webm" controls width="900"></video>
 
 ## 예외 처리
 
