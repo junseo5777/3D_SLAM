@@ -7,12 +7,12 @@ ndt_localization:
     # /initialpose는 지도상의 뒷바퀴 중심(base_link) 위치와 카트 전방(+X)을 뜻한다.
     # IMU 기울기는 FAST-LIO에서 가져오고 카트 장착값은 cart.yaml에서 전달한다.
     # /localization/pose는 base_link, /localization/lidar_pose는 라이다, /localization/imu_pose는 IMU이다.
-    registration_period: 0.5               # NDT 실행 간격(초), 0.5이면 최대 2Hz
+    registration_period: 0.2               # NDT 실행 간격(초), 최대 약 5Hz
     source_voxel_size: 0.5                 # 현재 점군 다운샘플링 크기(m)
     local_map_radius: 30.0                  # 예상 위치 주변에서 사용할 지도 반경(m)
     ndt_resolution: 1.0                    # NDT 격자 해상도(m)
     transformation_epsilon: 0.0004         # 반복 간 위치 보정량의 제곱 종료 기준(m², 2cm 이하; 실제 위치 정확도와 별개)
-    transformation_rotation_epsilon_degree: 0.5 # 반복 간 회전 변화 종료 기준(도), 위치 조건도 함께 만족해야 종료
+    transformation_rotation_epsilon_degree: 0.2 # 반복 간 회전 변화 종료 기준(도), 위치 조건도 함께 만족해야 종료
     max_iterations: 20                     # 한 번의 NDT 정합에서 허용할 최대 반복 횟수
     min_points: 30                         # NDT를 실행하기 위한 최소 점 개수
 
@@ -48,14 +48,19 @@ ndt_localization:
     tracking_timeout: 2.0                  # 정합 성공이 없을 때 재탐색으로 전환할 시간(초)
     max_failures: 5                        # 정상 추적 중 재탐색으로 전환할 연속 정합 실패 횟수
 
-    # 주행 중 추적이 끊기면 먼저 기존 조건으로 찾고, 지정 시간이 지나면 아래 한계까지 완화한다.
-    relocalization_relaxation_delay: 10.0  # 기존 조건으로 최근 위치를 찾을 시간(초)
-    relocalization_relaxation_step_duration: 5.0  # 다음 완화 단계로 넘어갈 시간(초)
+    # 주행 중 추적이 끊기면 작은 주변부터 찾고, 지역 범위를 한 번 넓힌 뒤 판정 조건까지 단계적으로 완화한다.
+    relocalization_relaxation_delay: 8.0   # 엄격한 주변 탐색 후 조건 완화를 시작할 시간(초)
+    relocalization_local_expansion_delay: 3.0 # 최초 소범위 탐색을 유지한 뒤 지역 탐색만 넓힐 시간(초)
+    relocalization_relaxation_step_duration: 3.0  # 다음 완화 단계로 넘어갈 시간(초)
     relocalization_relaxation_max_steps: 6 # 주행 중 재탐색 조건의 최대 완화 단계
     relocalization_registration_period: 1.0 # 확장 후보를 검사할 때 NDT 실행 간격(초)
-    relocalization_min_overlap_limit: 0.1  # 재탐색 겹침 비율의 최종 하한(10%)
+    relocalization_min_overlap_limit: 0.2  # 재탐색 겹침 비율의 최종 하한(20%)
     relocalization_max_fitness_limit: 3.0  # 재탐색 fitness 기준의 최종 상한(m²)
     relocalization_max_iterations_limit: 60  # 재탐색 NDT 반복 횟수의 최종 상한
+    relocalization_initial_search_xy: 0.25 # 추적 실패 직후 엄격하게 찾을 X/Y 소범위(m, 각각 ±값)
+    relocalization_initial_search_yaw_degree: 2.5 # 추적 실패 직후 엄격하게 찾을 yaw 소범위(도, ±값)
+    relocalization_expanded_search_xy: 0.5 # 3초 후 판정 조건을 유지하며 넓힐 X/Y 범위(m, 각각 ±값)
+    relocalization_expanded_search_yaw_degree: 5.0 # 3초 후 판정 조건을 유지하며 넓힐 yaw 범위(도, ±값)
     relocalization_search_xy_limit: 6.0    # 현재 예상 위치 주변 X/Y 탐색 범위의 최종 상한(m)
     relocalization_search_yaw_limit_degree: 45.0  # 현재 방향 주변 yaw 탐색 범위의 최종 상한(도)
     relocalization_local_map_radius_limit: 60.0  # 재탐색에 사용할 지역 지도 반경의 최종 상한(m)

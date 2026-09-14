@@ -89,19 +89,19 @@ public:
     {throw std::runtime_error("Invalid base_link mounting transform");}
     leaf_ = declare_parameter<double>("source_voxel_size", 0.5);
     radius_ = declare_parameter<double>("local_map_radius", 30.0);
-    period_ = declare_parameter<double>("registration_period", 0.5);
+    period_ = declare_parameter<double>("registration_period", 0.2);
     max_age_ = declare_parameter<double>("max_scan_age", 1.0);
     pairing_ = declare_parameter<double>("odom_pairing_tolerance", 0.03);
     timeout_ = declare_parameter<double>("tracking_timeout", 2.0);
     max_failures_ = declare_parameter<int>("max_failures", 5);
     o_.resolution = declare_parameter<double>("ndt_resolution", 1.0);
-    o_.epsilon = declare_parameter<double>("transformation_epsilon", 0.01);
+    o_.epsilon = declare_parameter<double>("transformation_epsilon", 0.0004);
     o_.rotation_epsilon_degree =
-      declare_parameter<double>("transformation_rotation_epsilon_degree", 0.5);
-    o_.max_iterations = declare_parameter<int>("max_iterations", 30);
+      declare_parameter<double>("transformation_rotation_epsilon_degree", 0.2);
+    o_.max_iterations = declare_parameter<int>("max_iterations", 20);
     o_.min_points = declare_parameter<int>("min_points", 30);
-    o_.max_fitness = declare_parameter<double>("max_fitness", 0.5);
-    o_.min_overlap = declare_parameter<double>("min_overlap", 0.5);
+    o_.max_fitness = declare_parameter<double>("max_fitness", 0.4);
+    o_.min_overlap = declare_parameter<double>("min_overlap", 0.6);
     o_.max_translation = declare_parameter<double>("max_correction_translation", 2.0);
     const double max_rotation_degree =
       declare_parameter<double>("max_correction_rotation_degree", 28.6478897565);
@@ -141,19 +141,33 @@ public:
       "initial_max_correction_rotation_limit_degree", 60.0);
     initial_max_rotation_limit_ = initial_max_rotation_limit_degree * kDegreeToRadian;
     relocalization_relaxation_delay_ =
-      declare_parameter<double>("relocalization_relaxation_delay", 10.0);
+      declare_parameter<double>("relocalization_relaxation_delay", 8.0);
+    relocalization_local_expansion_delay_ =
+      declare_parameter<double>("relocalization_local_expansion_delay", 3.0);
     relocalization_relaxation_step_duration_ =
-      declare_parameter<double>("relocalization_relaxation_step_duration", 5.0);
+      declare_parameter<double>("relocalization_relaxation_step_duration", 3.0);
     relocalization_relaxation_max_steps_ =
       declare_parameter<int>("relocalization_relaxation_max_steps", 6);
     relocalization_registration_period_ =
       declare_parameter<double>("relocalization_registration_period", 1.0);
     relocalization_min_overlap_limit_ =
-      declare_parameter<double>("relocalization_min_overlap_limit", 0.1);
+      declare_parameter<double>("relocalization_min_overlap_limit", 0.2);
     relocalization_max_fitness_limit_ =
       declare_parameter<double>("relocalization_max_fitness_limit", 3.0);
     relocalization_max_iterations_limit_ =
       declare_parameter<int>("relocalization_max_iterations_limit", 60);
+    relocalization_initial_search_xy_ =
+      declare_parameter<double>("relocalization_initial_search_xy", 0.25);
+    const double relocalization_initial_search_yaw_degree = declare_parameter<double>(
+      "relocalization_initial_search_yaw_degree", 2.5);
+    relocalization_initial_search_yaw_ =
+      relocalization_initial_search_yaw_degree * kDegreeToRadian;
+    relocalization_expanded_search_xy_ =
+      declare_parameter<double>("relocalization_expanded_search_xy", 0.5);
+    const double relocalization_expanded_search_yaw_degree = declare_parameter<double>(
+      "relocalization_expanded_search_yaw_degree", 5.0);
+    relocalization_expanded_search_yaw_ =
+      relocalization_expanded_search_yaw_degree * kDegreeToRadian;
     relocalization_search_xy_limit_ =
       declare_parameter<double>("relocalization_search_xy_limit", 6.0);
     const double relocalization_search_yaw_limit_degree = declare_parameter<double>(
@@ -192,9 +206,12 @@ public:
         initial_refinement_rotation_tolerance_, initial_min_overlap_limit_,
         initial_max_fitness_limit_, initial_search_xy_limit_, initial_search_yaw_limit_,
         initial_max_translation_limit_, initial_max_rotation_limit_,
-        relocalization_relaxation_delay_, relocalization_relaxation_step_duration_,
+        relocalization_relaxation_delay_, relocalization_local_expansion_delay_,
+        relocalization_relaxation_step_duration_,
         relocalization_registration_period_, relocalization_min_overlap_limit_,
-        relocalization_max_fitness_limit_, relocalization_search_xy_limit_,
+        relocalization_max_fitness_limit_, relocalization_initial_search_xy_,
+        relocalization_initial_search_yaw_, relocalization_expanded_search_xy_,
+        relocalization_expanded_search_yaw_, relocalization_search_xy_limit_,
         relocalization_search_yaw_limit_, relocalization_local_map_radius_limit_,
         relocalization_max_translation_limit_, relocalization_max_rotation_limit_,
         correction_speed_, correction_angular_speed_, confirmation_distance_,
@@ -220,13 +237,19 @@ public:
       initial_search_yaw_limit_ < initial_search_yaw_ ||
       initial_max_translation_limit_ < initial_o_.max_translation ||
       initial_max_rotation_limit_ < initial_o_.max_rotation ||
-      relocalization_relaxation_delay_ <= 0 || relocalization_relaxation_step_duration_ <= 0 ||
+      relocalization_relaxation_delay_ <= 0 || relocalization_local_expansion_delay_ <= 0 ||
+      relocalization_local_expansion_delay_ >= relocalization_relaxation_delay_ ||
+      relocalization_relaxation_step_duration_ <= 0 ||
       relocalization_relaxation_max_steps_ < 1 || relocalization_registration_period_ <= 0 ||
       relocalization_min_overlap_limit_ <= 0 ||
       relocalization_min_overlap_limit_ > o_.min_overlap ||
       relocalization_max_fitness_limit_ < o_.max_fitness ||
       relocalization_max_iterations_limit_ < o_.max_iterations ||
-      relocalization_search_xy_limit_ < 0 || relocalization_search_yaw_limit_ < 0 ||
+      relocalization_initial_search_xy_ <= 0 || relocalization_initial_search_yaw_ <= 0 ||
+      relocalization_expanded_search_xy_ < relocalization_initial_search_xy_ ||
+      relocalization_expanded_search_yaw_ < relocalization_initial_search_yaw_ ||
+      relocalization_search_xy_limit_ < relocalization_expanded_search_xy_ ||
+      relocalization_search_yaw_limit_ < relocalization_expanded_search_yaw_ ||
       relocalization_local_map_radius_limit_ < radius_ ||
       relocalization_max_translation_limit_ < o_.max_translation ||
       relocalization_max_rotation_limit_ < o_.max_rotation ||
@@ -326,8 +349,11 @@ private:
     settings.options.max_rotation = relax(o_.max_rotation, relocalization_max_rotation_limit_);
     settings.options.max_iterations = static_cast<int>(std::lround(
         relax(o_.max_iterations, relocalization_max_iterations_limit_)));
-    settings.search_xy = ratio * relocalization_search_xy_limit_;
-    settings.search_yaw = ratio * relocalization_search_yaw_limit_;
+    // 8초 이후의 완화는 2단계 지역 탐색 범위를 기준으로 점차 넓힌다.
+    settings.search_xy = relax(
+      relocalization_expanded_search_xy_, relocalization_search_xy_limit_);
+    settings.search_yaw = relax(
+      relocalization_expanded_search_yaw_, relocalization_search_yaw_limit_);
     settings.local_map_radius = relax(radius_, relocalization_local_map_radius_limit_);
     return settings;
   }
@@ -489,6 +515,14 @@ private:
       w.options = settings.options; w.fallback_options = settings.options;
       w.radius = settings.local_map_radius;
       w.search_xy = settings.search_xy; w.search_yaw = settings.search_yaw;
+      // 복구 직후에는 작은 범위만 검사하고, 3초가 지나면 판정 조건은 그대로 둔 채
+      // 지역 탐색 범위만 0.5m와 5도로 넓힌다.
+      if (w.recovery && w.level == 0 &&
+        w.stamp - relocalization_start_ < relocalization_local_expansion_delay_)
+      {
+        w.search_xy = relocalization_initial_search_xy_;
+        w.search_yaw = relocalization_initial_search_yaw_;
+      }
       w.tighter_options = recoverySettings(std::max(0, w.level - 1)).options;
     }
     return w;
@@ -524,7 +558,7 @@ private:
       done.result = attempt(w.guess, w.fallback_options);
     }
     // 가까운 후보부터 확인하고, 예산이 끝나면 다음 최신 스캔에서 나머지 후보를 이어 확인한다.
-    if (!done.result.accepted && (w.initial || w.level > 0) &&
+    if (!done.result.accepted && (w.initial || w.recovery || w.tightening) &&
       source->size() >= static_cast<size_t>(w.options.min_points))
     {
       std::vector<Eigen::Vector3d> candidates;
@@ -708,9 +742,12 @@ private:
     initial_refinement_translation_tolerance_, initial_refinement_rotation_tolerance_,
     initial_min_overlap_limit_, initial_max_fitness_limit_, initial_search_xy_limit_,
     initial_search_yaw_limit_, initial_max_translation_limit_, initial_max_rotation_limit_,
-    relocalization_relaxation_delay_, relocalization_relaxation_step_duration_,
+    relocalization_relaxation_delay_, relocalization_local_expansion_delay_,
+    relocalization_relaxation_step_duration_,
     relocalization_registration_period_, relocalization_min_overlap_limit_,
-    relocalization_max_fitness_limit_, relocalization_search_xy_limit_,
+    relocalization_max_fitness_limit_, relocalization_initial_search_xy_,
+    relocalization_initial_search_yaw_, relocalization_expanded_search_xy_,
+    relocalization_expanded_search_yaw_, relocalization_search_xy_limit_,
     relocalization_search_yaw_limit_, relocalization_local_map_radius_limit_,
     relocalization_max_translation_limit_, relocalization_max_rotation_limit_,
     correction_speed_, correction_angular_speed_, confirmation_distance_, confirmation_angle_,

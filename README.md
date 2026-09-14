@@ -1,105 +1,112 @@
 # VLP-16 + CV7 3D Mapping & NDT Localization
 
-> 현재 개발 중인 ROS 2 기반 3D 매핑·위치추정 프로젝트입니다. 이 저장소는 2026-09-14 기준 작업 내용을 보존한 중간 스냅샷이며, 실제 차량 주행 검증 후 내용을 계속 보완할 예정입니다.
+> ROS 2 Humble 기반의 3D mapping·localization 프로젝트입니다. 2026-09-14까지 구현한 코드 구조와 주요 처리 방식을 정리했습니다.
 
-![현재 시험 환경의 3D 지도](images/mapping_overview.png)
+![실내 환경에서 생성한 3D 점군 지도](images/mapping_overview.png)
 
-## 프로젝트 개요
+## 프로젝트 목표
 
-Velodyne VLP-16 LiDAR와 MicroStrain 3DM-CV7-AHRS IMU를 결합해 3D 지도를 생성하고, 저장한 지도에서 차량 위치를 추정하는 시스템을 개발하고 있습니다. ROS 2 Humble 환경에서 FAST-LIO2로 LiDAR-inertial odometry를 계산하고, 직접 구현한 voxel map builder와 PCL NDT localization을 연결했습니다.
+Velodyne VLP-16 LiDAR와 MicroStrain 3DM-CV7-AHRS IMU로 3D 지도를 만들고, 저장한 PCD 지도에서 카트의 위치를 계속 추정하는 시스템을 개발했습니다. FAST-LIO2를 VLP-16 입력과 센서 장착 방향에 맞게 수정하고, voxel map builder와 PCL NDT localization을 직접 연결했습니다.
 
-이 프로젝트의 목표는 다음과 같습니다.
+이 과정에서 다음 문제를 해결하는 데 집중했습니다.
 
-- VLP-16과 CV7의 실제 출력 형식·좌표계·주기에 맞는 LIO 입력 구성
-- 노트북에서 동작할 수 있는 3D 지도 누적과 PCD 저장
-- 저장 지도와 현재 점군을 이용한 NDT 기반 위치 보정
-- 초기 위치 오차와 일시적인 정합 실패에서도 위치 출력이 급격히 흔들리지 않는 복구 구조 설계
+- organized VLP-16 점군의 비유한 점과 point time을 FAST-LIO2 입력에 맞게 정리
+- 뒤집혀 장착된 IMU에서도 위쪽 축과 초기 LiDAR heading이 일관된 지도 생성
+- 움직이는 물체가 지도에 계속 남지 않도록 free-space 관측 기반 voxel 삭제
+- NDT 계산 중에도 ROS callback과 pose 발행을 유지하는 비동기 구조
+- 초기 위치 오차와 추적 단절에서 가까운 후보부터 단계적으로 넓히는 재탐색
+- 큰 지도 보정이 RViz pose에 순간 적용되지 않도록 시간 기반 보정 제한
 
 ## 시스템 구성
 
-| 구분 | 구성 |
-|---|---|
-| LiDAR | Velodyne VLP-16, 약 9.9 Hz |
-| IMU | MicroStrain 3DM-CV7-AHRS, 약 100 Hz |
-| 환경 | ROS 2 Humble, C++17, PCL, Eigen |
-| LIO | FAST-LIO2 ROS 2 포팅본을 VLP-16/CV7 환경에 맞게 수정 |
-| Mapping | voxel 기반 전역 점군 누적과 동적 잔상 제거 |
-| Localization | 부분 지도 기반 PCL NDT와 단계적 재탐색 |
+### Mapping
 
 ```mermaid
 flowchart LR
     VLP[VLP-16] --> VD[Velodyne driver]
-    VD --> CLOUD["/velodyne_points"]
+    VD --> VP["/velodyne_points"]
     CV7[3DM-CV7-AHRS] --> MD[MicroStrain driver]
     MD --> IMU["/imu/data"]
-    CLOUD --> LIO[Modified FAST-LIO2]
+    VP --> LIO[Modified FAST-LIO2]
     IMU --> LIO
-    LIO --> ODOM[LiDAR-inertial odometry]
-    LIO --> WORLD[World point cloud]
-    LIO --> BODY[Deskewed body cloud]
-    WORLD --> MAP[Map builder]
-    MAP --> PCD[PCD map]
-    BODY --> NDT[NDT localization]
-    ODOM --> NDT
-    PCD --> NDT
-    NDT --> POSE[map to odom / vehicle pose]
+    LIO --> ODOM["map → imu_link"]
+    LIO --> WORLD["/fast_lio/cloud_world"]
+    ODOM --> BUILDER[Voxel map builder]
+    WORLD --> BUILDER
+    BUILDER --> PCD[PCD map]
 ```
 
-## 구현한 내용
+### Localization
 
-### 1. VLP-16 입력에 맞춘 FAST-LIO2 수정
+```mermaid
+flowchart LR
+    VLP[VLP-16] --> LIO[FAST-LIO2 local odometry]
+    CV7[CV7 IMU] --> LIO
+    LIO --> ODOM["odom → imu_link"]
+    LIO --> BODY[Deskewed body cloud]
+    PCD[Saved PCD] --> NDT[Async NDT localization]
+    BODY --> NDT
+    ODOM --> NDT
+    NDT --> TF["map → odom"]
+    TF --> POSE[base_link pose]
+```
 
-기준으로 사용한 FAST-LIO2 ROS 2 포팅본은 Livox 중심의 의존성과 입력 처리를 포함하고 있었습니다. VLP-16의 `x/y/z/intensity/ring/time` 필드를 직접 처리하도록 보완하고, 유효하지 않은 좌표와 ring을 제거한 뒤 point time 순서로 정렬했습니다. LiDAR는 Reliable QoS, IMU는 SensorData QoS로 수신하도록 조정했으며, timestamp가 역행하면 병렬 버퍼를 함께 초기화하도록 수정했습니다.
+Mapping에서는 FAST-LIO2의 전역 좌표를 `map`으로 사용합니다. Localization에서는 FAST-LIO2를 연속적인 로컬 `odom`으로 두고 NDT가 `map → odom`만 보정합니다. 지도 보정을 FAST-LIO2 내부 상태에 다시 주입하지 않아 같은 보정이 중복 적용되지 않도록 했습니다.
 
-CV7이 뒤집힌 방향으로 장착된 시험 환경에서도 지도의 수평면과 LiDAR 전방을 일관되게 유지할 수 있도록, 초기 IMU 평균 가속도와 LiDAR 외부 회전을 이용해 world frame의 중력 방향과 heading을 초기화했습니다. 수정 사항은 [`patches/fast_lio_ros2.patch`](patches/fast_lio_ros2.patch)에 보존했습니다.
+## 주요 구현
 
-### 2. 지도 누적과 동적 잔상 제거
+### VLP-16/CV7에 맞춘 FAST-LIO2
 
-[`map_builder_node.cpp`](velodyne_slam/src/map_builder_node.cpp)는 FAST-LIO2가 출력한 world-frame 점군을 voxel 단위로 누적하고 PCD로 저장합니다. 현재 라이다 원점에서 측정점까지의 광선 경로를 free space로 간주하고, 기존 voxel이 여러 스캔에서 연속으로 비어 있다고 관측될 때만 삭제합니다. 점이 다시 관측되거나 중간 스캔의 대응 odometry가 없으면 누적 횟수를 초기화해 벽과 고정 물체가 쉽게 지워지지 않도록 했습니다.
+VLP-16의 `x/y/z/intensity/ring/time` 필드를 직접 처리하고, NaN·Inf, 잘못된 ring과 time을 제거한 뒤 point time 순서로 정렬했습니다. LiDAR는 Reliable QoS, IMU는 SensorData QoS로 수신하고, timestamp가 역행하면 서로 대응하는 버퍼를 함께 초기화합니다.
 
-### 3. 비동기 NDT 위치추정과 복구
+초기 IMU 평균 가속도로 중력 방향을 정렬하면서 LiDAR 전방을 world +X로 유지하는 초기 좌표 정렬도 추가했습니다.
 
-[`ndt_localization_node.cpp`](velodyne_slam/src/ndt_localization_node.cpp)는 저장 지도 전체를 매번 정합하지 않고 예상 위치 주변의 부분 지도만 사용합니다. NDT는 별도 작업 스레드에서 실행하며 대기 점군은 최신 한 장만 유지해 ROS callback과 pose 발행이 막히지 않도록 구성했습니다.
+### Voxel 지도와 동적 잔상 제거
 
-정합 결과는 수렴 여부만 사용하지 않고 fitness, overlap, 반복 횟수, 예측 위치 대비 보정량을 함께 검사합니다. 초기 위치와 재탐색 후보는 차량 이동을 보상한 지도 보정값이 연속으로 일치할 때만 적용합니다. 추적이 끊기면 최근 위치 주변부터 재탐색하고, 실패가 계속되면 탐색 범위와 허용 조건을 단계적으로 완화합니다. 복구 후에는 더 엄격한 조건을 연속으로 통과할 때까지 한 단계씩 정상 기준으로 되돌립니다.
+[`map_builder_node.cpp`](velodyne_slam/src/map_builder_node.cpp)는 world-frame 점군을 0.2 m voxel로 누적하고 PCD로 저장합니다. 현재 LiDAR 원점에서 측정점 앞까지 광선을 추적해 기존 voxel이 연속 5회 free space로 관측될 때 삭제합니다. 중간 스캔에서 광선이 지나가지 않았거나 점이 다시 관측되면 연속 횟수를 초기화해 고정 구조물이 쉽게 지워지지 않도록 했습니다.
 
-### 4. 좌표계와 차량 기준점 정리
+### 비동기 NDT와 단계적 재탐색
 
-Mapping에서는 FAST-LIO2가 `map → imu_link`를 발행하고, localization에서는 `odom → imu_link`를 유지하면서 NDT가 `map → odom`만 보정합니다. FAST-LIO2 내부 상태에 지도 보정을 다시 주입하지 않아 동일한 보정이 두 번 적용되는 것을 피했습니다. 사용자에게 표시하는 차량 위치는 IMU나 LiDAR 원점이 아니라 카트 뒷바퀴 축 중심인 `base_link`를 기준으로 계산합니다.
+[`ndt_localization_node.cpp`](velodyne_slam/src/ndt_localization_node.cpp)는 예상 위치 주변의 부분 지도만 구성해 NDT를 실행합니다. 정합은 별도 작업에서 처리하며 최신 점군 한 장만 대기시켜 계산 지연이 누적되지 않도록 했습니다. 수렴 여부와 함께 fitness, overlap, 반복 횟수, 예상 위치 대비 보정량을 검사합니다.
 
-## 현재 결과
+추적 단절 직후에는 strict 조건을 유지한 채 ±0.25 m·±2.5°를 찾고, 3초 뒤에는 ±0.5 m·±5°로 넓힙니다. 8초 이후에는 3초 간격으로 조건과 탐색 범위를 최대 6단계까지 완화합니다. 초기 위치와 복구 후보는 차량 이동을 보상한 결과가 3회 연속 일관될 때 채택하며, 복구 후에도 더 엄격한 조건을 단계별로 다시 통과해야 정상 추적으로 돌아갑니다.
+
+확정된 지도 보정은 최대 0.5 m/s, 15°/s로 출력에 반영합니다. 실제 이동을 나타내는 FAST-LIO odometry는 계속 즉시 반영되며, NDT로 계산한 전역 correction만 제한합니다.
+
+### 차량 기준 pose
+
+사용자에게 표시하는 `/localization/pose`는 LiDAR나 IMU 원점이 아니라 카트 뒷바퀴 축 중심인 `base_link`입니다. `/localization/lidar_pose`와 `/localization/imu_pose`도 함께 발행해 센서 원점과 차량 기준점을 구분했습니다. RViz의 `2D Pose Estimate` 역시 `base_link` 위치와 카트 전방을 입력받습니다.
+
+## 시연 영상
+
+| 영상 | 확인할 수 있는 동작 |
+|---|---|
+| [초기 자세 입력과 지역 정합](videos/localization_initial_pose_refinement.webm) | RViz에서 큰 방향 변화를 포함한 초기 자세를 입력한 뒤 현재 점군과 pose가 지도 구조에 맞춰지는 과정 |
+| [이동 중 pose 갱신과 재정렬](videos/localization_motion_and_realignment.webm) | 이동·회전 중 pose와 현재 점군이 계속 갱신되고, 일시적으로 벌어진 지도와의 기하 구조가 다시 가까워지는 과정 |
+
+두 영상은 2026-09-14의 최종 파라미터 조정 이후 녹화했으며, 수동 초기 자세 입력과 이동 중 localization 동작을 RViz에서 확인할 수 있습니다.
+
+## 예외 처리
+
+실제 센서와 비동기 정합에서 잘못된 한 입력이 전체 pose를 오염시키지 않도록 단계마다 입력을 검사합니다.
+
+- launch 단계에서 mode, boolean 인자, 지도 파일 존재 여부와 센서 장착 행렬을 검사합니다.
+- 장착 회전행렬은 모든 값이 유한한지, 각 축이 직교하는지, determinant가 +1인지 확인합니다.
+- LiDAR point의 NaN·Inf, 잘못된 ring과 음수 time을 제거하고 point time 순서를 보장합니다.
+- odometry와 point cloud의 frame 및 timestamp를 확인하고, 0.03초 안에서 대응되는 입력만 함께 처리합니다.
+- timestamp가 중복되거나 역행하면 해당 입력을 거부하고 관련 작업과 버퍼를 초기화합니다.
+- NDT 결과는 수렴 여부, 반복 횟수, 유한한 pose, fitness, overlap과 보정량을 모두 통과해야 채택합니다.
+- 초기화 이전에 시작됐거나 측정 시각보다 오래된 비동기 결과는 generation과 timestamp를 사용해 폐기합니다.
+- 지도 저장 시 빈 지도를 거부하고 임시 파일 기록 후 rename하여 기존 PCD가 쓰기 도중 손상되는 것을 막습니다.
 
 ![벽과 구조물이 누적된 점군 상세 화면](images/mapping_detail.png)
-
-| 검증 항목 | 현재 결과 | 범위 |
-|---|---:|---|
-| VLP-16 point cloud | 약 9.9 Hz, 29,184 points/scan | 실제 센서 정지 측정 |
-| CV7 IMU | 약 100 Hz | 실제 센서 정지 측정 |
-| 합성 FAST-LIO2 출력 | 약 9.8 Hz | 작은 정지 실내 합성 입력 |
-| 합성 파이프라인 메모리 | Mapping 약 214 MB, Localization 약 228 MB | 자식 프로세스 peak RSS |
-| NDT 합성 정합 | overlap 1.0, 최근 기록 약 3–10 ms | 작은 부분 지도 |
-| 추적 복구 | 완화된 재탐색과 엄격 조건 복귀 확인 | 합성 파이프라인 |
-
-단위 테스트에서는 알려진 변환의 NDT 정합, 지도 밖 초기값과 빈 점군 거부, 초기 자세와 차량 기준점 변환, 위치 보정 속도 제한, 연속 free-space 판정을 확인했습니다. 원시 측정과 합성 검증 결과는 [`velodyne_slam/docs`](velodyne_slam/docs)에 저장했습니다.
-
-## 현재 진행 상태와 제한
-
-현재 구현은 LiDAR-inertial mapping과 저장 지도 기반 localization 단계입니다. 다음 항목은 아직 완료하지 않았습니다.
-
-- 실제 차량 이동 상태에서 LiDAR–IMU 외부 보정과 시간 오프셋 검증
-- 기준 궤적을 이용한 절대 위치 정확도 측정
-- 넓은 지도와 빠른 이동에서의 연산 시간·메모리 측정
-- 반복 주행에서 동적 잔상 제거 파라미터 비교
-- loop closure와 pose graph optimization
-- 지도 전체 범위의 global relocalization
-
-현재 저장된 지도와 자세는 미측정 외부 보정값을 사용한 시험 결과이므로 정밀 위치 결과로 간주하지 않습니다.
 
 ## 저장소 구성
 
 ```text
 3D_SLAM/
-├── velodyne_slam/        # 직접 구현한 ROS 2 패키지와 현재 개발 문서
-├── patches/              # FAST-LIO2에 적용한 로컬 변경
-├── images/               # RViz 결과 화면
+├── velodyne_slam/   # 직접 구현한 ROS 2 package와 설정
+├── images/          # mapping 결과 화면
+├── videos/          # localization RViz 시연
 └── README.md
+```
