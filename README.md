@@ -78,13 +78,13 @@ VLP-16의 `x/y/z/intensity/ring/time` 필드를 직접 처리하고, NaN·Inf, �
 
 RViz에서 큰 방향 변화를 포함한 초기 자세를 입력한 뒤 현재 점군과 pose가 지도 구조에 맞춰지는 과정입니다.
 
-<video src="https://raw.githubusercontent.com/junseo5777/3D_SLAM/main/videos/localization_initial_pose_refinement.webm" controls width="900"></video>
+https://github.com/user-attachments/assets/8d3810aa-62bf-469c-8c62-11c88515abda
 
 ### 이동 중 pose 갱신과 재정렬
 
 이동·회전 중 pose와 현재 점군이 계속 갱신되고, 일시적으로 벌어진 지도와의 기하 구조가 다시 가까워지는 과정입니다.
 
-<video src="https://raw.githubusercontent.com/junseo5777/3D_SLAM/main/videos/localization_motion_and_realignment.webm" controls width="900"></video>
+https://github.com/user-attachments/assets/49f4eb76-d903-4796-9808-1c09cfb4a4bf
 
 ## 예외 처리
 
