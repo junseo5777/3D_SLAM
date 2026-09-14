@@ -1,0 +1,13 @@
+# 차량에 장착한 뒤 아래 임시값을 실측한 base_link -> 센서 변환값으로 교체한다.
+# xyz 단위는 m, rpy_degrees 단위는 도이며 IMU 회전은 ROS 출력 좌표계를 기준으로 한다.
+# 실제 장착 변환값을 입력한 뒤에만 calibrated를 true로 바꾼다.
+calibrated: false                          # 차량 기준 센서 장착값의 실측 완료 여부
+transforms:
+  - parent: base_link                      # 라이다 장착 변환의 부모 좌표계
+    child: velodyne                        # 라이다 장착 변환의 자식 좌표계
+    xyz: [0.0, 0.0, 0.0]                  # base_link 기준 라이다 위치(m)
+    rpy_degrees: [0.0, 0.0, 0.0]          # base_link 기준 라이다 roll·pitch·yaw(도)
+  - parent: base_link                      # IMU 장착 변환의 부모 좌표계
+    child: imu_link                        # IMU 장착 변환의 자식 좌표계
+    xyz: [0.0, 0.0, 0.0]                  # base_link 기준 IMU 위치(m)
+    rpy_degrees: [0.0, 0.0, 0.0]          # base_link 기준 IMU roll·pitch·yaw(도)

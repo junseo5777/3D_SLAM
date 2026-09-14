@@ -1,0 +1,615 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index e091f3a..bb8e733 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,6 +1,10 @@
+ cmake_minimum_required(VERSION 3.8)
+ project(fast_lio)
+ 
++if(POLICY CMP0074)
++  cmake_policy(SET CMP0074 NEW)
++endif()
++
+ if(NOT CMAKE_BUILD_TYPE)
+   set(CMAKE_BUILD_TYPE Release)
+ endif()
+@@ -57,9 +61,14 @@ find_package(sensor_msgs REQUIRED)
+ find_package(std_msgs REQUIRED)
+ find_package(std_srvs REQUIRED)
+ find_package(visualization_msgs REQUIRED)
+-find_package(pcl_ros REQUIRED)
++
+ find_package(pcl_conversions REQUIRED)
+-find_package(livox_ros_driver2 REQUIRED)
++option(FASTLIO_WITH_LIVOX "Build Livox CustomMsg input support" OFF)
++if(FASTLIO_WITH_LIVOX)
++  find_package(livox_ros_driver2 REQUIRED)
++  add_compile_definitions(FASTLIO_WITH_LIVOX)
++endif()
++find_package(tf2_ros REQUIRED)
+ find_package(rosidl_default_generators REQUIRED)
+ 
+ set(dependencies
+@@ -71,11 +80,14 @@ set(dependencies
+   std_msgs
+   std_srvs
+   visualization_msgs
+-  pcl_ros
++  tf2_ros
+   pcl_conversions
+-  livox_ros_driver2
+ )
+ 
++if(FASTLIO_WITH_LIVOX)
++  list(APPEND dependencies livox_ros_driver2)
++endif()
++
+ # Thirdparty libraries
+ find_package(Eigen3 REQUIRED)
+ find_package(PCL REQUIRED COMPONENTS common io)
+@@ -125,4 +137,14 @@ install(
+   DESTINATION share/${PROJECT_NAME}
+ )
+ 
++if(BUILD_TESTING)
++  find_package(ament_cmake_gtest REQUIRED)
++  ament_add_gtest(test_velodyne_input test/test_velodyne_input.cpp src/preprocess.cpp)
++  target_include_directories(test_velodyne_input PRIVATE src include ${PCL_INCLUDE_DIRS})
++  target_link_libraries(test_velodyne_input ${PCL_LIBRARIES})
++  ament_target_dependencies(test_velodyne_input ${dependencies})
++  ament_add_gtest(test_initial_world_alignment test/test_initial_world_alignment.cpp)
++  target_include_directories(test_initial_world_alignment PRIVATE include)
++  target_link_libraries(test_initial_world_alignment Eigen3::Eigen)
++endif()
+ ament_package()
+diff --git a/package.xml b/package.xml
+index 8c39e18..be53174 100644
+--- a/package.xml
++++ b/package.xml
+@@ -25,11 +25,13 @@
+   <depend>sensor_msgs</depend>
+   <depend>common_interfaces</depend>
+   <depend>tf2</depend>
+-  <depend>pcl_ros</depend>
++  <depend>tf2_ros</depend>
++  <depend>std_srvs</depend>
++  <depend>visualization_msgs</depend>
+   <depend>pcl_conversions</depend>
+-  <depend>livox_ros_driver2</depend>
+ 
+   <exec_depend>rosidl_default_runtime</exec_depend>
++  <test_depend>ament_cmake_gtest</test_depend>
+   <member_of_group>rosidl_interface_packages</member_of_group>
+ 
+   <export>
+diff --git a/src/IMU_Processing.hpp b/src/IMU_Processing.hpp
+index f35378f..fd305fb 100644
+--- a/src/IMU_Processing.hpp
++++ b/src/IMU_Processing.hpp
+@@ -20,10 +20,7 @@
+ #include <sensor_msgs/msg/point_cloud2.hpp>
+ #include <geometry_msgs/msg/vector3.hpp>
+ #include "use-ikfom.hpp"
+-
+-/// *************Preconfiguration
+-
+-#define MAX_INI_COUNT (10)
++#include "initial_world_alignment.hpp"
+ 
+ const bool time_list(PointType &x, PointType &y) {return (x.curvature < y.curvature);};
+ 
+@@ -46,6 +43,8 @@ class ImuProcess
+   void set_acc_cov(const V3D &scaler);
+   void set_gyr_bias_cov(const V3D &b_g);
+   void set_acc_bias_cov(const V3D &b_a);
++  void set_init_duration(double duration);
++  void set_align_world_with_lidar(bool enabled);
+   Eigen::Matrix<double, 12, 12> Q;
+   void Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, PointCloudXYZI::Ptr pcl_un_);
+ 
+@@ -76,6 +75,8 @@ class ImuProcess
+   V3D acc_s_last;
+   double start_timestamp_;
+   double last_lidar_end_time_;
++  double init_duration_ = 3.0;
++  bool   align_world_with_lidar_ = false;
+   int    init_iter_num = 1;
+   bool   b_first_frame_ = true;
+   bool   imu_need_init_ = true;
+@@ -153,6 +154,19 @@ void ImuProcess::set_acc_bias_cov(const V3D &b_a)
+   cov_bias_acc = b_a;
+ }
+ 
++void ImuProcess::set_init_duration(double duration)
++{
++  if (!std::isfinite(duration) || duration <= 0.0) {
++    throw std::invalid_argument("IMU initialization duration must be finite and positive");
++  }
++  init_duration_ = duration;
++}
++
++void ImuProcess::set_align_world_with_lidar(bool enabled)
++{
++  align_world_with_lidar_ = enabled;
++}
++
+ void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, int &N)
+ {
+   /** 1. initializing the gravity, gyro bias, acc and gyro covariance
+@@ -190,9 +204,16 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom,
+     N ++;
+   }
+   state_ikfom init_state = kf_state.get_x();
+-  init_state.grav = S2(- mean_acc / mean_acc.norm() * G_m_s2);
+-  
+-  //state_inout.rot = Eye3d; // Exp(mean_acc.cross(V3D(0, 0, -1 / scale_gravity)));
++  if (align_world_with_lidar_)
++  {
++    const M3D world_R_imu = fast_lio::levelWorldFromImu(mean_acc, Lidar_R_wrt_IMU);
++    init_state.rot = world_R_imu;
++    init_state.grav = S2(V3D(0.0, 0.0, -G_m_s2));
++  }
++  else
++  {
++    init_state.grav = S2(- mean_acc / mean_acc.norm() * G_m_s2);
++  }
+   init_state.bg  = mean_gyr;
+   init_state.offset_T_L_I = Lidar_T_wrt_IMU;
+   init_state.offset_R_L_I = Lidar_R_wrt_IMU;
+@@ -354,14 +375,16 @@ void ImuProcess::Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom,
+     last_imu_   = meas.imu.back();
+ 
+     state_ikfom imu_state = kf_state.get_x();
+-    if (init_iter_num > MAX_INI_COUNT)
++    const double initialization_elapsed = meas.lidar_end_time - first_lidar_time;
++    if (initialization_elapsed >= init_duration_)
+     {
+       cov_acc *= pow(G_m_s2 / mean_acc.norm(), 2);
+       imu_need_init_ = false;
+ 
+       cov_acc = cov_acc_scale;
+       cov_gyr = cov_gyr_scale;
+-      std::cout << "IMU Initial Done" << std::endl;
++      std::cout << "IMU Initial Done after " << initialization_elapsed << " seconds and "
++                << init_iter_num << " samples" << std::endl;
+       // ROS_INFO("IMU Initial Done: Gravity: %.4f %.4f %.4f %.4f; state.bias_g: %.4f %.4f %.4f; acc covarience: %.8f %.8f %.8f; gry covarience: %.8f %.8f %.8f",\
+       //          imu_state.grav[0], imu_state.grav[1], imu_state.grav[2], mean_acc.norm(), cov_bias_gyr[0], cov_bias_gyr[1], cov_bias_gyr[2], cov_acc[0], cov_acc[1], cov_acc[2], cov_gyr[0], cov_gyr[1], cov_gyr[2]);
+       fout_imu.open(DEBUG_FILE_DIR("imu.txt"),ios::out);
+diff --git a/src/laserMapping.cpp b/src/laserMapping.cpp
+index d441261..67d1e84 100644
+--- a/src/laserMapping.cpp
++++ b/src/laserMapping.cpp
+@@ -59,7 +59,9 @@
+ #include <tf2_ros/transform_broadcaster.h>
+ #include <geometry_msgs/msg/transform_stamped.hpp>
+ #include <geometry_msgs/msg/vector3.hpp>
++#ifdef FASTLIO_WITH_LIVOX
+ #include <livox_ros_driver2/msg/custom_msg.hpp>
++#endif
+ #include "preprocess.h"
+ #include <ikd-Tree/ikd_Tree.h>
+ 
+@@ -73,7 +75,9 @@ double kdtree_incremental_time = 0.0, kdtree_search_time = 0.0, kdtree_delete_ti
+ double T1[MAXN], s_plot[MAXN], s_plot2[MAXN], s_plot3[MAXN], s_plot4[MAXN], s_plot5[MAXN], s_plot6[MAXN], s_plot7[MAXN], s_plot8[MAXN], s_plot9[MAXN], s_plot10[MAXN], s_plot11[MAXN];
+ double match_time = 0, solve_time = 0, solve_const_H_time = 0;
+ int    kdtree_size_st = 0, kdtree_size_end = 0, add_point_size = 0, kdtree_delete_counter = 0;
++std::string world_frame = "odom", body_frame = "imu_link";
+ bool   runtime_pos_log = false, pcd_save_en = false, time_sync_en = false, extrinsic_est_en = true, path_en = true;
++bool   align_world_with_lidar = false;
+ /**************************/
+ 
+ float res_last[100000] = {0.0};
+@@ -90,6 +94,7 @@ string map_file_path, lid_topic, imu_topic;
+ double res_mean_last = 0.05, total_residual = 0.0;
+ double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
+ double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
++double imu_init_duration = 3.0;
+ double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
+ double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;
+ int    effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
+@@ -290,6 +295,7 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
+     {
+         std::cerr << "lidar loop back, clear buffer" << std::endl;
+         lidar_buffer.clear();
++        time_buffer.clear();
+     }
+     if (is_first_lidar)
+     {
+@@ -308,6 +314,7 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
+ 
+ double timediff_lidar_wrt_imu = 0.0;
+ bool   timediff_set_flg = false;
++#ifdef FASTLIO_WITH_LIVOX
+ void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg) 
+ {
+     mtx_buffer.lock();
+@@ -318,6 +325,7 @@ void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg)
+     {
+         std::cerr << "lidar loop back, clear buffer" << std::endl;
+         lidar_buffer.clear();
++        time_buffer.clear();
+     }
+     if(is_first_lidar)
+     {
+@@ -346,6 +354,8 @@ void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg)
+     mtx_buffer.unlock();
+     sig_buffer.notify_all();
+ }
++#endif
++
+ 
+ void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in)
+ {
+@@ -505,7 +515,7 @@ void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Share
+         pcl::toROSMsg(*laserCloudWorld, laserCloudmsg);
+         // laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
+         laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
+-        laserCloudmsg.header.frame_id = "camera_init";
++        laserCloudmsg.header.frame_id = world_frame;
+         pubLaserCloudFull->publish(laserCloudmsg);
+         publish_count -= PUBFRAME_PERIOD;
+     }
+@@ -557,7 +567,7 @@ void publish_frame_body(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Shared
+     sensor_msgs::msg::PointCloud2 laserCloudmsg;
+     pcl::toROSMsg(*laserCloudIMUBody, laserCloudmsg);
+     laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
+-    laserCloudmsg.header.frame_id = "body";
++    laserCloudmsg.header.frame_id = body_frame;
+     pubLaserCloudFull_body->publish(laserCloudmsg);
+     publish_count -= PUBFRAME_PERIOD;
+ }
+@@ -574,7 +584,7 @@ void publish_effect_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Shar
+     sensor_msgs::msg::PointCloud2 laserCloudFullRes3;
+     pcl::toROSMsg(*laserCloudWorld, laserCloudFullRes3);
+     laserCloudFullRes3.header.stamp = get_ros_time(lidar_end_time);
+-    laserCloudFullRes3.header.frame_id = "camera_init";
++    laserCloudFullRes3.header.frame_id = world_frame;
+     pubLaserCloudEffect->publish(laserCloudFullRes3);
+ }
+ 
+@@ -596,13 +606,13 @@ void publish_map(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub
+     pcl::toROSMsg(*pcl_wait_pub, laserCloudmsg);
+     // laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
+     laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
+-    laserCloudmsg.header.frame_id = "camera_init";
++    laserCloudmsg.header.frame_id = world_frame;
+     pubLaserCloudMap->publish(laserCloudmsg);
+ 
+     // sensor_msgs::msg::PointCloud2 laserCloudMap;
+     // pcl::toROSMsg(*featsFromMap, laserCloudMap);
+     // laserCloudMap.header.stamp = get_ros_time(lidar_end_time);
+-    // laserCloudMap.header.frame_id = "camera_init";
++    // laserCloudMap.header.frame_id = world_frame;
+     // pubLaserCloudMap->publish(laserCloudMap);
+ }
+ 
+@@ -627,11 +637,10 @@ void set_posestamp(T & out)
+ 
+ void publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped, std::unique_ptr<tf2_ros::TransformBroadcaster> & tf_br)
+ {
+-    odomAftMapped.header.frame_id = "camera_init";
+-    odomAftMapped.child_frame_id = "body";
++    odomAftMapped.header.frame_id = world_frame;
++    odomAftMapped.child_frame_id = body_frame;
+     odomAftMapped.header.stamp = get_ros_time(lidar_end_time);
+     set_posestamp(odomAftMapped.pose);
+-    pubOdomAftMapped->publish(odomAftMapped);
+     auto P = kf.get_P();
+     for (int i = 0; i < 6; i ++)
+     {
+@@ -644,10 +653,11 @@ void publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPt
+         odomAftMapped.pose.covariance[i*6 + 5] = P(k, 2);
+     }
+ 
++    pubOdomAftMapped->publish(odomAftMapped);
+     geometry_msgs::msg::TransformStamped trans;
+-    trans.header.frame_id = "camera_init";
++    trans.header.frame_id = world_frame;
+     trans.header.stamp = odomAftMapped.header.stamp;
+-    trans.child_frame_id = "body";
++    trans.child_frame_id = body_frame;
+     trans.transform.translation.x = odomAftMapped.pose.pose.position.x;
+     trans.transform.translation.y = odomAftMapped.pose.pose.position.y;
+     trans.transform.translation.z = odomAftMapped.pose.pose.position.z;
+@@ -662,7 +672,7 @@ void publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath)
+ {
+     set_posestamp(msg_body_pose);
+     msg_body_pose.header.stamp = get_ros_time(lidar_end_time); // ros::Time().fromSec(lidar_end_time);
+-    msg_body_pose.header.frame_id = "camera_init";
++    msg_body_pose.header.frame_id = world_frame;
+ 
+     /*** if path is too large, the rvis will crash ***/
+     static int jjj = 0;
+@@ -798,6 +808,8 @@ class LaserMappingNode : public rclcpp::Node
+ public:
+     LaserMappingNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions()) : Node("laser_mapping", options)
+     {
++        world_frame = this->declare_parameter<std::string>("world_frame", "odom");
++        body_frame = this->declare_parameter<std::string>("body_frame", "imu_link");
+         this->declare_parameter<bool>("publish.path_en", true);
+         this->declare_parameter<bool>("publish.effect_map_en", false);
+         this->declare_parameter<bool>("publish.map_en", false);
+@@ -820,6 +832,8 @@ public:
+         this->declare_parameter<double>("mapping.acc_cov", 0.1);
+         this->declare_parameter<double>("mapping.b_gyr_cov", 0.0001);
+         this->declare_parameter<double>("mapping.b_acc_cov", 0.0001);
++        this->declare_parameter<double>("mapping.imu_init_duration", 3.0);
++        this->declare_parameter<bool>("mapping.align_world_with_lidar", false);
+         this->declare_parameter<double>("preprocess.blind", 0.01);
+         this->declare_parameter<int>("preprocess.lidar_type", AVIA);
+         this->declare_parameter<int>("preprocess.scan_line", 16);
+@@ -856,6 +870,8 @@ public:
+         this->get_parameter_or<double>("mapping.acc_cov",acc_cov,0.1);
+         this->get_parameter_or<double>("mapping.b_gyr_cov",b_gyr_cov,0.0001);
+         this->get_parameter_or<double>("mapping.b_acc_cov",b_acc_cov,0.0001);
++        this->get_parameter_or<double>("mapping.imu_init_duration",imu_init_duration,3.0);
++        this->get_parameter_or<bool>("mapping.align_world_with_lidar",align_world_with_lidar,false);
+         this->get_parameter_or<double>("preprocess.blind", p_pre->blind, 0.01);
+         this->get_parameter_or<int>("preprocess.lidar_type", p_pre->lidar_type, AVIA);
+         this->get_parameter_or<int>("preprocess.scan_line", p_pre->N_SCANS, 16);
+@@ -873,7 +889,7 @@ public:
+         RCLCPP_INFO(this->get_logger(), "p_pre->lidar_type %d", p_pre->lidar_type);
+ 
+         path.header.stamp = this->get_clock()->now();
+-        path.header.frame_id ="camera_init";
++        path.header.frame_id =world_frame;
+ 
+         // /*** variables definition ***/
+         // int effect_feat_num = 0, frame_num = 0;
+@@ -899,6 +915,8 @@ public:
+         p_imu->set_acc_cov(V3D(acc_cov, acc_cov, acc_cov));
+         p_imu->set_gyr_bias_cov(V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
+         p_imu->set_acc_bias_cov(V3D(b_acc_cov, b_acc_cov, b_acc_cov));
++        p_imu->set_init_duration(imu_init_duration);
++        p_imu->set_align_world_with_lidar(align_world_with_lidar);
+ 
+         fill(epsi, epsi+23, 0.001);
+         kf.init_dyn_share(get_f, df_dx, df_dw, h_share_model, NUM_MAX_ITERATIONS, epsi);
+@@ -920,13 +938,17 @@ public:
+         /*** ROS subscribe initialization ***/
+         if (p_pre->lidar_type == AVIA)
+         {
++#ifdef FASTLIO_WITH_LIVOX
+             sub_pcl_livox_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(lid_topic, 20, livox_pcl_cbk);
++#else
++            throw std::runtime_error("Livox support disabled; use preprocess.lidar_type=2 for VLP-16");
++#endif
+         }
+         else
+         {
+-            sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
++            sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::QoS(10).reliable(), standard_pcl_cbk);
+         }
+-        sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
++        sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS().keep_last(200), imu_cbk);
+         pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
+         pubLaserCloudFull_body_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
+         pubLaserCloudEffect_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 20);
+@@ -1137,7 +1159,9 @@ private:
+     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath_;
+     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
+     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc_;
++#ifdef FASTLIO_WITH_LIVOX
+     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox_;
++#endif
+ 
+     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+     rclcpp::TimerBase::SharedPtr timer_;
+diff --git a/src/preprocess.cpp b/src/preprocess.cpp
+index 88444f4..9f2f618 100644
+--- a/src/preprocess.cpp
++++ b/src/preprocess.cpp
+@@ -1,6 +1,8 @@
+ #include "preprocess.h"
+ 
+ #include <pcl/common/common.h>
++#include <algorithm>
++#include <cmath>
+ 
+ #define RETURN0 0x00
+ #define RETURN0AND1 0x10
+@@ -44,11 +46,14 @@ void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num)
+   point_filter_num = pfilt_num;
+ }
+ 
++#ifdef FASTLIO_WITH_LIVOX
+ void Preprocess::process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg, PointCloudXYZI::Ptr& pcl_out)
+ {
+   avia_handler(msg);
+   *pcl_out = pl_surf;
+ }
++#endif
++
+ 
+ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, PointCloudXYZI::Ptr& pcl_out)
+ {
+@@ -92,6 +97,7 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, Po
+   *pcl_out = pl_surf;
+ }
+ 
++#ifdef FASTLIO_WITH_LIVOX
+ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg)
+ {
+   pl_surf.clear();
+@@ -192,6 +198,8 @@ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr
+     }
+   }
+ }
++#endif
++
+ 
+ void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
+ {
+@@ -301,6 +309,14 @@ void Preprocess::velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr
+ 
+   pcl::PointCloud<velodyne_ros::Point> pl_orig;
+   pcl::fromROSMsg(*msg, pl_orig);
++  // Organized VLP-16 clouds contain invalid slots. Preserve per-point timing.
++  pl_orig.points.erase(std::remove_if(pl_orig.points.begin(), pl_orig.points.end(),
++      [this](const auto &p) {
++        return !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
++               !std::isfinite(p.time) || p.time < 0 || p.ring >= N_SCANS;
++      }), pl_orig.points.end());
++  std::stable_sort(pl_orig.points.begin(), pl_orig.points.end(),
++      [](const auto &a, const auto &b) { return a.time < b.time; });
+   int plsize = pl_orig.points.size();
+   if (plsize == 0)
+     return;
+diff --git a/src/preprocess.h b/src/preprocess.h
+index 7f7d7a1..d4777ff 100644
+--- a/src/preprocess.h
++++ b/src/preprocess.h
+@@ -2,7 +2,9 @@
+ #include <rclcpp/rclcpp.hpp>
+ #include <pcl_conversions/pcl_conversions.h>
+ #include <sensor_msgs/msg/point_cloud2.hpp>
++#ifdef FASTLIO_WITH_LIVOX
+ #include <livox_ros_driver2/msg/custom_msg.hpp>
++#endif
+ 
+ using namespace std;
+ 
+@@ -158,7 +160,9 @@ class Preprocess
+   Preprocess();
+   ~Preprocess();
+   
++#ifdef FASTLIO_WITH_LIVOX
+   void process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg, PointCloudXYZI::Ptr &pcl_out);
++#endif
+   void process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, PointCloudXYZI::Ptr &pcl_out);
+   void set(bool feat_en, int lid_type, double bld, int pfilt_num);
+ 
+@@ -173,7 +177,9 @@ class Preprocess
+   // ros::Publisher pub_full, pub_surf, pub_corn;
+ 
+ private:
++#ifdef FASTLIO_WITH_LIVOX
+   void avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg);
++#endif
+   void oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
+   void velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
+   void mid360_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
+diff --git a/include/initial_world_alignment.hpp b/include/initial_world_alignment.hpp
+new file mode 100644
+index 0000000..c7d2bce
+--- /dev/null
++++ b/include/initial_world_alignment.hpp
+@@ -0,0 +1,39 @@
++#pragma once
++
++#include <Eigen/Core>
++#include <cmath>
++#include <stdexcept>
++
++namespace fast_lio
++{
++
++// Return the IMU-to-world rotation for a level ENU-style world frame.  At
++// rest, specific force points up.  LiDAR +X supplies the otherwise unknown
++// heading after it is projected onto the horizontal plane.
++inline Eigen::Matrix3d levelWorldFromImu(
++  const Eigen::Vector3d & mean_acc_imu,
++  const Eigen::Matrix3d & imu_R_lidar)
++{
++  if (!mean_acc_imu.allFinite() || !imu_R_lidar.allFinite() ||
++    mean_acc_imu.norm() < 1e-6)
++  {
++    throw std::runtime_error("Invalid IMU acceleration or LiDAR extrinsic rotation");
++  }
++
++  const Eigen::Vector3d up_imu = mean_acc_imu.normalized();
++  const Eigen::Vector3d lidar_x_imu = imu_R_lidar.col(0);
++  Eigen::Vector3d forward_imu = lidar_x_imu - up_imu * up_imu.dot(lidar_x_imu);
++  if (forward_imu.norm() < 1e-6) {
++    throw std::runtime_error("LiDAR +X is parallel to gravity; cannot initialize a level world frame");
++  }
++  forward_imu.normalize();
++  const Eigen::Vector3d left_imu = up_imu.cross(forward_imu).normalized();
++
++  Eigen::Matrix3d world_R_imu;
++  world_R_imu.row(0) = forward_imu.transpose();
++  world_R_imu.row(1) = left_imu.transpose();
++  world_R_imu.row(2) = up_imu.transpose();
++  return world_R_imu;
++}
++
++}  // namespace fast_lio
+diff --git a/test/test_initial_world_alignment.cpp b/test/test_initial_world_alignment.cpp
+new file mode 100644
+index 0000000..938b6ca
+--- /dev/null
++++ b/test/test_initial_world_alignment.cpp
+@@ -0,0 +1,37 @@
++#include "initial_world_alignment.hpp"
++
++#include <gtest/gtest.h>
++#include <Eigen/Geometry>
++
++TEST(InitialWorldAlignment, LevelsInvertedImuAndPreservesLidarAxes)
++{
++  Eigen::Matrix3d imu_R_lidar = Eigen::Vector3d(-1.0, 1.0, -1.0).asDiagonal();
++  const Eigen::Matrix3d world_R_imu = fast_lio::levelWorldFromImu(
++    Eigen::Vector3d(0.0, 0.0, -9.80665), imu_R_lidar);
++
++  EXPECT_TRUE((world_R_imu * imu_R_lidar).isApprox(Eigen::Matrix3d::Identity(), 1e-12));
++  EXPECT_TRUE((world_R_imu * Eigen::Vector3d(0.0, 0.0, -1.0)).isApprox(
++    Eigen::Vector3d::UnitZ(), 1e-12));
++}
++
++TEST(InitialWorldAlignment, RemovesRollAndPitchFromTiltedLidar)
++{
++  const Eigen::AngleAxisd tilt(0.35, Eigen::Vector3d::UnitY());
++  const Eigen::Matrix3d imu_R_lidar = tilt.toRotationMatrix();
++  const Eigen::Vector3d measured_up_imu = imu_R_lidar * Eigen::Vector3d::UnitZ();
++  const Eigen::Matrix3d world_R_lidar =
++    fast_lio::levelWorldFromImu(measured_up_imu, imu_R_lidar) * imu_R_lidar;
++
++  EXPECT_TRUE(world_R_lidar.isApprox(Eigen::Matrix3d::Identity(), 1e-12));
++}
++
++TEST(InitialWorldAlignment, RejectsDegenerateForwardDirection)
++{
++  Eigen::Matrix3d imu_R_lidar;
++  imu_R_lidar << 0.0, 1.0, 0.0,
++                 0.0, 0.0, 1.0,
++                 1.0, 0.0, 0.0;
++  EXPECT_THROW(
++    fast_lio::levelWorldFromImu(Eigen::Vector3d::UnitZ(), imu_R_lidar),
++    std::runtime_error);
++}
+diff --git a/test/test_velodyne_input.cpp b/test/test_velodyne_input.cpp
+new file mode 100644
+index 0000000..94329e4
+--- /dev/null
++++ b/test/test_velodyne_input.cpp
+@@ -0,0 +1,30 @@
++#include "preprocess.h"
++#include <gtest/gtest.h>
++#include <limits>
++
++TEST(VelodyneInput, RetainsSecondsAndSortsValidSixteenRingPoints)
++{
++  Preprocess preprocessing;
++  preprocessing.set(false, VELO16, 0.9, 1);
++  preprocessing.N_SCANS = 16;
++  preprocessing.SCAN_RATE = 10;
++  preprocessing.time_unit = SEC;
++  pcl::PointCloud<velodyne_ros::Point> cloud;
++  for (float time : {0.09f, 0.01f, 0.05f}) {
++    velodyne_ros::Point point{};
++    point.x = 2.0; point.intensity = 20.0; point.time = time; point.ring = 15;
++    cloud.push_back(point);
++  }
++  auto bad = cloud.front();
++  bad.ring = 16; cloud.push_back(bad);
++  bad.ring = 0; bad.x = std::numeric_limits<float>::infinity(); cloud.push_back(bad);
++  bad.x = std::numeric_limits<float>::quiet_NaN(); cloud.push_back(bad);
++  auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
++  pcl::toROSMsg(cloud, *msg);
++  PointCloudXYZI::Ptr output(new PointCloudXYZI);
++  preprocessing.process(msg, output);
++  ASSERT_EQ(output->size(), 3u);
++  EXPECT_NEAR(output->points[0].curvature, 10.0, 0.001);
++  EXPECT_NEAR(output->points[1].curvature, 50.0, 0.001);
++  EXPECT_NEAR(output->points[2].curvature, 90.0, 0.001);
++}

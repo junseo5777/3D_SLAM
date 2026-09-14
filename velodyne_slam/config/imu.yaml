@@ -1,0 +1,31 @@
+microstrain_inertial_driver:
+  ros__parameters:
+    port: /dev/serial/by-id/usb-Lord_Microstrain_Lord_Inertial_Sensor_0000_6286.167183-if00  # CV7 고정 장치 경로
+    baudrate: 115200                       # IMU 직렬 통신 속도(bps)
+    set_baud: false                        # 시작할 때 장치 통신 속도를 변경할지 여부
+    device_setup: true                     # 시작할 때 아래 설정을 장치에 적용할지 여부
+    save_settings: false                   # 설정을 IMU 비휘발성 메모리에 저장할지 여부
+    frame_id: imu_link                     # IMU 메시지의 좌표계 이름
+    use_enu_frame: true                    # ROS 표준 ENU 좌표계로 변환해 발행할지 여부
+    # 라이다와 공유하는 PPS/GPS 시계가 없으므로 두 드라이버 모두 호스트 수신 시간을 사용한다.
+    # 같은 컴퓨터 시계를 쓰지만 하드웨어 동기화가 된 상태는 아니다.
+    timestamp_source: 0                    # 메시지 시간 기준(0: 호스트 수신 시간)
+    tf_mode: 0                             # 드라이버 자체 TF 발행 모드(0: 사용 안 함)
+    publish_mount_to_frame_id_transform: false  # 장착 프레임에서 imu_link로 가는 TF 발행 여부
+    # 현재 CV7-AHRS 구성에는 GNSS/PPS 입력이 없다.
+    filter_pps_source: 0                   # 필터가 사용할 PPS 입력 소스
+    filter_declination_source: 1           # 자기 편각을 얻을 소스 선택값
+    filter_enable_gnss_pos_vel_aiding: false     # GNSS 위치·속도 보조 사용 여부
+    filter_enable_gnss_heading_aiding: false     # GNSS 방향 보조 사용 여부
+    filter_enable_gnss_antenna_cal: false        # GNSS 안테나 오프셋 자동 보정 여부
+    gnss1_antenna_offset_source: 0         # GNSS 1 안테나 오프셋 소스
+    gnss2_antenna_offset_source: 0         # GNSS 2 안테나 오프셋 소스
+    gnss1_llh_position_data_rate: 0        # GNSS 1 위경고도 발행 주기(0: 발행 안 함)
+    gnss1_velocity_data_rate: 0            # GNSS 1 속도 발행 주기(0: 발행 안 함)
+    gnss2_llh_position_data_rate: 0        # GNSS 2 위경고도 발행 주기(0: 발행 안 함)
+    gnss2_velocity_data_rate: 0            # GNSS 2 속도 발행 주기(0: 발행 안 함)
+    imu_data_rate: 100                     # 원시 IMU 데이터 발행 주기(Hz)
+    filter_imu_data_rate: 25               # 장치 필터 IMU 데이터 발행 주기(Hz)
+    filter_odometry_earth_data_rate: 0     # 지구 좌표계 오도메트리 발행 주기(0: 발행 안 함)
+    filter_odometry_map_data_rate: 0       # 지도 좌표계 오도메트리 발행 주기(0: 발행 안 함)
+    filter_human_readable_status_data_rate: 1  # 필터 상태 메시지 발행 주기(Hz)

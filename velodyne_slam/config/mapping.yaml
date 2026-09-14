@@ -1,0 +1,12 @@
+velodyne_slam:
+  ros__parameters:
+    mode: mapping                         # 전처리 기본 노드의 동작 모드
+    input_topic: /velodyne_points          # 입력 포인트클라우드 토픽
+    input_reliability: reliable            # 입력 토픽 QoS 신뢰성 정책
+    min_range: 1.0                         # 전처리에 사용할 최소 거리(m)
+    max_range: 80.0                        # 전처리에 사용할 최대 거리(m)
+    voxel_size: 0.3                        # 전처리 다운샘플링 복셀 크기(m)
+    map_path: ""                           # 예비 지도 경로 항목(이 노드는 지도를 저장하지 않음)
+    map_frame: map                         # 지도 전역 좌표계 이름
+    odom_frame: odom                       # 연속 이동 좌표계 이름
+    base_frame: base_link                  # 이동체 기준 좌표계 이름

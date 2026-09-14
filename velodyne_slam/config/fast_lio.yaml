@@ -1,0 +1,41 @@
+fast_lio:
+  ros__parameters:
+    world_frame: map                       # FAST-LIO가 결과를 표현할 전역 좌표계
+    body_frame: imu_link                   # 상태 추정의 기준이 되는 IMU 좌표계
+    feature_extract_enable: false          # 별도 모서리·평면 특징 추출 사용 여부
+    point_filter_num: 2                    # 입력 점을 2개마다 1개씩 사용해 연산량 절감
+    max_iteration: 3                       # 한 스캔에서 상태 보정을 반복할 최대 횟수
+    filter_size_surf: 0.3                  # 현재 스캔 표면점 복셀 크기(m)
+    filter_size_map: 0.3                   # 내부 지도점 복셀 크기(m)
+    cube_side_length: 200.0                # FAST-LIO 내부 지역 지도 큐브 한 변 길이(m)
+    runtime_pos_log_enable: false          # 실행 중 위치 로그 파일 기록 여부
+    common:
+      lid_topic: /velodyne_points          # 입력 라이다 포인트클라우드 토픽
+      imu_topic: /imu/data                 # 입력 IMU 토픽
+      time_sync_en: false                  # 소프트웨어 시간 동기화 보정 사용 여부
+      time_offset_lidar_to_imu: 0.0        # 라이다 기준 IMU 시간 오프셋(초)
+    preprocess:
+      lidar_type: 2                        # FAST-LIO 라이다 종류(2: Velodyne 계열)
+      scan_line: 16                        # VLP-16 수직 채널 수
+      scan_rate: 10                        # 라이다 회전 주기(Hz)
+      timestamp_unit: 0                    # 점별 time 필드 단위(0: 초)
+      blind: 0.9                           # 이 거리보다 가까운 점을 제거(m)
+    mapping:
+      acc_cov: 0.1                         # 가속도 측정 잡음 공분산
+      gyr_cov: 0.1                         # 각속도 측정 잡음 공분산
+      b_acc_cov: 0.0001                    # 가속도계 바이어스 변화 공분산
+      b_gyr_cov: 0.0001                    # 자이로 바이어스 변화 공분산
+      imu_init_duration: 3.0               # 시작할 때 장치를 정지시켜 IMU를 초기화할 시간(초)
+      align_world_with_lidar: true         # 중력으로 지도 Z축을 맞추고 초기 라이다 +X를 지도 +X로 사용
+      fov_degree: 360.0                    # 내부 지도 탐색에 사용하는 라이다 수평 시야각(도)
+      det_range: 10.0                      # FAST-LIO가 정합에 사용할 최대 거리(m)
+      extrinsic_est_en: false              # 실행 중 라이다-IMU 외부 보정값 추정 여부
+      # 외부 보정값은 launch가 lidar_imu_calibration.yaml에서 읽어 전달한다.
+    publish:
+      path_en: false                       # 전체 이동 경로 토픽 발행 여부
+      scan_publish_en: true                # 전역 좌표계 정합 포인트클라우드 발행 여부
+      dense_publish_en: true               # 필터링 전의 조밀한 점군 발행 여부
+      scan_bodyframe_pub_en: true          # 본체 좌표계 점군 발행 여부
+    pcd_save:
+      pcd_save_en: false                   # 지도 저장은 map_builder와 /save_map 서비스가 담당
+      interval: -1                         # FAST-LIO 자체 PCD 분할 저장 간격(-1: 분할 안 함)

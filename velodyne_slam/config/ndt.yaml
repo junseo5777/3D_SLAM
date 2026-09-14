@@ -1,0 +1,75 @@
+ndt_localization:
+  ros__parameters:
+    map_frame: map                         # 저장된 지도가 사용하는 기준 좌표계
+    odom_frame: odom                       # FAST-LIO가 사용하는 주행 좌표계
+    body_frame: imu_link                   # NDT 입력 점군과 odometry의 본체 좌표계
+
+    # /initialpose는 지도상의 뒷바퀴 중심(base_link) 위치와 카트 전방(+X)을 뜻한다.
+    # IMU 기울기는 FAST-LIO에서 가져오고 카트 장착값은 cart.yaml에서 전달한다.
+    # /localization/pose는 base_link, /localization/lidar_pose는 라이다, /localization/imu_pose는 IMU이다.
+    registration_period: 0.5               # NDT 실행 간격(초), 0.5이면 최대 2Hz
+    source_voxel_size: 0.5                 # 현재 점군 다운샘플링 크기(m)
+    local_map_radius: 30.0                  # 예상 위치 주변에서 사용할 지도 반경(m)
+    ndt_resolution: 1.0                    # NDT 격자 해상도(m)
+    transformation_epsilon: 0.0004         # 반복 간 위치 보정량의 제곱 종료 기준(m², 2cm 이하; 실제 위치 정확도와 별개)
+    transformation_rotation_epsilon_degree: 0.5 # 반복 간 회전 변화 종료 기준(도), 위치 조건도 함께 만족해야 종료
+    max_iterations: 20                     # 한 번의 NDT 정합에서 허용할 최대 반복 횟수
+    min_points: 30                         # NDT를 실행하기 위한 최소 점 개수
+
+    # 정상 추적 중 사용하는 엄격한 정합 판정 기준
+    max_fitness: 0.4                       # 최근접점 평균 제곱 거리의 최대값(m²), 작을수록 엄격함
+    min_overlap: 0.6                       # 현재 점군과 지도의 최소 겹침 비율(0.5=50%)
+    max_correction_translation: 2.0        # 한 번에 허용할 최대 위치 보정량(m)
+    max_correction_rotation_degree: 28.6478897565  # 한 번에 허용할 최대 회전 보정량(도)
+
+    # RViz에서 수동 초기 위치를 지정할 때만 사용하는 넓은 탐색·판정 기준
+    initial_search_xy: 1.0                 # 클릭 위치를 중심으로 탐색할 X/Y 범위(m, 각각 ±값)
+    initial_search_yaw_degree: 15.0         # 클릭 방향을 중심으로 탐색할 회전 범위(도, ±값)
+    initial_max_fitness: 1.5               # 초기 정합에서 허용할 최대 fitness(m²)
+    initial_min_overlap: 0.3               # 초기 위치 보정에 필요한 최소 겹침 비율(30%)
+    initial_max_correction_translation: 3.0 # 후보 위치에서 허용할 최대 위치 보정량(m)
+    initial_max_correction_rotation_degree: 45.8366236105  # 후보 방향에서 허용할 최대 회전 보정량(도)
+    initial_refinement_translation_tolerance: 0.1  # 초기 위치 보정을 끝낼 위치 오차 기준(m)
+    initial_refinement_rotation_tolerance_degree: 2.0  # 초기 위치 보정을 끝낼 회전 오차 기준(도)
+
+    # 초기 NDT 실패가 반복될 때 아래 한계까지 판정 조건과 탐색 범위를 단계적으로 완화한다.
+    initial_relaxation_failures_per_step: 3 # 완화 단계를 한 단계 올릴 연속 실패 횟수
+    initial_relaxation_max_steps: 6         # 초기 NDT 조건을 완화할 최대 단계 수
+    initial_min_overlap_limit: 0.1          # 완화해도 유지할 최소 겹침 비율 하한(10%)
+    initial_max_fitness_limit: 3.0          # 완화할 초기 fitness 기준의 상한(m²)
+    initial_max_iterations_limit: 60        # 완화할 NDT 최대 반복 횟수의 상한
+    initial_search_xy_limit: 2.0            # 완화할 X/Y 주변 탐색 범위의 상한(m, 각각 ±값)
+    initial_search_yaw_limit_degree: 30.0   # 완화할 yaw 주변 탐색 범위의 상한(도, ±값)
+    initial_max_correction_translation_limit: 4.0  # 완화할 위치 보정량의 상한(m)
+    initial_max_correction_rotation_limit_degree: 60.0  # 완화할 회전 보정량의 상한(도)
+
+    max_scan_age: 1.0                      # 처리할 점군의 최대 시간 지연(초)
+    odom_pairing_tolerance: 0.03            # 점군과 odometry의 최대 시각 차이(초)
+    tracking_timeout: 2.0                  # 정합 성공이 없을 때 재탐색으로 전환할 시간(초)
+    max_failures: 5                        # 정상 추적 중 재탐색으로 전환할 연속 정합 실패 횟수
+
+    # 주행 중 추적이 끊기면 먼저 기존 조건으로 찾고, 지정 시간이 지나면 아래 한계까지 완화한다.
+    relocalization_relaxation_delay: 10.0  # 기존 조건으로 최근 위치를 찾을 시간(초)
+    relocalization_relaxation_step_duration: 5.0  # 다음 완화 단계로 넘어갈 시간(초)
+    relocalization_relaxation_max_steps: 6 # 주행 중 재탐색 조건의 최대 완화 단계
+    relocalization_registration_period: 1.0 # 확장 후보를 검사할 때 NDT 실행 간격(초)
+    relocalization_min_overlap_limit: 0.1  # 재탐색 겹침 비율의 최종 하한(10%)
+    relocalization_max_fitness_limit: 3.0  # 재탐색 fitness 기준의 최종 상한(m²)
+    relocalization_max_iterations_limit: 60  # 재탐색 NDT 반복 횟수의 최종 상한
+    relocalization_search_xy_limit: 6.0    # 현재 예상 위치 주변 X/Y 탐색 범위의 최종 상한(m)
+    relocalization_search_yaw_limit_degree: 45.0  # 현재 방향 주변 yaw 탐색 범위의 최종 상한(도)
+    relocalization_local_map_radius_limit: 60.0  # 재탐색에 사용할 지역 지도 반경의 최종 상한(m)
+    relocalization_max_correction_translation_limit: 6.0  # 재탐색 위치 보정량의 최종 상한(m)
+    relocalization_max_correction_rotation_limit_degree: 75.0  # 재탐색 회전 보정량의 최종 상한(도)
+    recovery_tightening_successes_per_step: 3  # 조건을 한 단계 엄격하게 할 연속 성공 횟수
+
+    # NDT 작업은 별도 스레드에서 최신 점군 한 장만 처리한다.
+    search_candidates_per_job: 5           # 한 작업에서 검사할 정합 후보 최대 개수(조건 복원 검사는 별도 1회)
+    search_time_budget_ms: 150.0           # 이 시간이 지나면 추가 후보 검사 중지(ms, 진행 중인 1회 정합은 완료)
+    registration_result_max_age: 2.0       # 측정 시각부터 이보다 오래된 NDT 결과는 폐기(초)
+    candidate_confirmation_count: 3        # 초기·복구 후보가 일관되게 나와야 하는 연속 횟수
+    candidate_consistency_translation: 0.3 # 이동을 고려한 복구 후보 간 위치 차이 허용값(m)
+    candidate_consistency_rotation_degree: 5.0 # 복구 후보 간 회전 차이 허용값(도)
+    candidate_confirmation_max_gap: 3.0    # 검증 후보 사이 최대 시각 간격(초, 초과 시 연속 횟수 초기화)
+    correction_max_speed: 0.5              # 지도 보정에 따른 위치 변화의 최대 속도(m/s, 실제 주행 속도와 별개)
+    correction_max_angular_speed_degree: 15.0 # 지도 보정에 따른 회전 변화의 최대 속도(도/s)
