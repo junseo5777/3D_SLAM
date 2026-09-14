@@ -1,14 +1,9 @@
 # VLP-16 + CV7 3D Mapping & NDT Localization
 
-> ROS 2 Humble 기반의 3D mapping·localization 프로젝트입니다. 2026-09-14까지 구현한 코드 구조와 주요 처리 방식을 정리했습니다.
 
 ![실내 환경에서 생성한 3D 점군 지도](images/mapping_overview.png)
 
 ## 프로젝트 목표
-
-Velodyne VLP-16 LiDAR와 MicroStrain 3DM-CV7-AHRS IMU로 3D 지도를 만들고, 저장한 PCD 지도에서 카트의 위치를 계속 추정하는 시스템을 개발했습니다. FAST-LIO2를 VLP-16 입력과 센서 장착 방향에 맞게 수정하고, voxel map builder와 PCL NDT localization을 직접 연결했습니다.
-
-이 과정에서 다음 문제를 해결하는 데 집중했습니다.
 
 - organized VLP-16 점군의 비유한 점과 point time을 FAST-LIO2 입력에 맞게 정리
 - 뒤집혀 장착된 IMU에서도 위쪽 축과 초기 LiDAR heading이 일관된 지도 생성
@@ -83,8 +78,6 @@ VLP-16의 `x/y/z/intensity/ring/time` 필드를 직접 처리하고, NaN·Inf, �
 |---|---|
 | [초기 자세 입력과 지역 정합](videos/localization_initial_pose_refinement.webm) | RViz에서 큰 방향 변화를 포함한 초기 자세를 입력한 뒤 현재 점군과 pose가 지도 구조에 맞춰지는 과정 |
 | [이동 중 pose 갱신과 재정렬](videos/localization_motion_and_realignment.webm) | 이동·회전 중 pose와 현재 점군이 계속 갱신되고, 일시적으로 벌어진 지도와의 기하 구조가 다시 가까워지는 과정 |
-
-두 영상은 2026-09-14의 최종 파라미터 조정 이후 녹화했으며, 수동 초기 자세 입력과 이동 중 localization 동작을 RViz에서 확인할 수 있습니다.
 
 ## 예외 처리
 
