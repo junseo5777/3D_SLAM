@@ -1,0 +1,13 @@
+# 파라미터 이름은 ROS 인터페이스와 연결되므로 그대로 사용합니다.
+/**:
+  ros__parameters:
+    enable_drive: false  # 기존 AUTO 토픽으로 차량 명령을 발행할지 여부
+    output_calibrated: false  # 실측 속도·PWM 관계와 실제 주행·조향 부호의 확인 여부
+    forward_input_sign: -1.0  # 기존 AUTO 입력에서 실제 전진을 만드는 부호(+1 또는 -1)
+    steering_input_sign: 0.0  # 좌조향 양수 계산값을 기존 조향 입력으로 바꾸는 부호, 0은 미확인
+    max_pwm: 150.0  # 기존 Arduino 제한 이하로 적용할 PWM 크기 상한(최대 150)
+    speed_knots_mps: [0.0]  # 실측 속도 보정표의 오름차순 속도 목록(m/s), 첫 값은 0
+    forward_pwm_knots: [0.0]  # 각 실측 속도에 대응하는 전진 PWM 크기 목록, 첫 값은 0
+    reverse_pwm_knots: [0.0]  # 각 실측 속도에 대응하는 후진 PWM 크기 목록, 첫 값은 0
+    mode_timeout: 0.5  # JOY 모드 명령의 최대 수신 지연(초)
+    command_timeout: 0.3  # 주차 명령과 상태의 최대 수신 지연(초)

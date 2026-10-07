@@ -1,0 +1,55 @@
+# 파라미터 이름은 ROS 인터페이스와 연결되므로 그대로 사용합니다.
+/**:
+  ros__parameters:
+    map_frame: map  # 저장 지도와 목표 위치의 기준 좌표계
+    base_frame: base_link  # 후륜축 중심의 차량 좌표계
+    pose_topic: /localization/pose  # NDT가 발행하는 차량 위치 입력 토픽
+    ndt_status_topic: /localization/status  # NDT 정합 상태 입력 토픽
+    cloud_topic: /velodyne_points  # 현재 장애물 검사용 실시간 점군 입력 토픽
+    goal_topic: /parking/goal  # 지도 기준 주차 목표 입력 토픽
+    initial_pose_topic: /initialpose  # 경로 확인 모드에서 RViz 시작 자세를 받을 토픽
+    mode_topic: /cmd_vel  # 기존 JOY 수동·자동·긴급정지 명령 입력 토픽
+    control_rate: 10.0  # 주차 추종 계산 주기(Hz)
+    planning_only: false  # RViz 시작·목표 자세로 경로만 생성하며 주행 출력은 차단
+    require_auto_mode: false  # 계산 단계에서도 JOY의 AUTO 상태를 요구할지 여부
+    pose_timeout: 0.5  # 차량 위치 입력의 최대 지연(초)
+    ndt_status_timeout: 0.8  # NDT 상태 수신의 최대 지연(초)
+    cloud_timeout: 0.5  # 실시간 점군 입력의 최대 지연(초)
+    ndt_confirmations: 3  # 주행 허용 전 필요한 연속 정상 NDT 결과 수
+    ndt_max_fitness: 0.4  # 정상 NDT로 인정할 최대 평균 제곱 정합 오차(m²)
+    ndt_min_overlap: 0.6  # 정상 NDT로 인정할 최소 점군 겹침 비율(0~1)
+    ground_mode: local  # 지면 높이 방식: local은 주변 점 추정, flat은 고정 높이
+    ground_z: -0.88  # flat 방식에서만 사용하는 지도 기준 지면 높이(m)
+    ground_radius: 1.0  # 주변 지면 높이를 찾는 수평 검색 반경(m)
+    ground_percentile: 15.0  # 주변 점 높이의 지면 추정 분위수(%)
+    min_ground_points: 5  # 주변 지면 높이를 추정할 최소 점 개수
+    obstacle_min_height: 0.08  # 지면 대비 이 높이 이상의 점을 장애물로 사용(m)
+    obstacle_max_range: 4.0  # 실시간 장애물 검색의 최대 수평 거리(m)
+    min_cloud_points: 20  # 유효 점군으로 인정할 최소 원시 점 개수
+    forward_speed_mps: 0.20  # 전진 추종의 기준 물리 속도(m/s)
+    reverse_speed_mps: 0.15  # 후진 추종 속도의 크기(m/s)
+    lookahead: 0.70  # 전진 경로에서 목표점을 앞서 보는 거리(m)
+    endpoint_distance: 0.10  # 구간 끝에서 정지를 시작할 위치 오차(m)
+    gear_dwell: 2.0  # 전후진 전환 전에 0 명령을 유지하는 시간(초)
+    final_dwell: 2.0  # 최종 오차 검사 전에 0 명령을 유지하는 시간(초)
+    longitudinal_tolerance: 0.15  # 주차 완료에 허용할 목표 방향 종방향 오차(m)
+    lateral_tolerance: 0.10  # 주차 완료에 허용할 목표 방향 횡방향 오차(m)
+    yaw_tolerance_deg: 8.0  # 주차 완료에 허용할 차체 방향 오차(도)
+    path_error_limit: 0.75  # 추종을 중단할 경로 이탈 거리(m)
+    reverse_observable: false  # 실제 후방 장애물 관측이 확보된 경우에만 후진 허용
+    enable_retry: false  # 최종 주차 오차가 클 때 한 번만 재주차할지 여부
+    retry_min_forward: 0.40  # 재주차에서 후진 전에 반드시 전진할 최소 거리(m)
+    retry_max_reverse: 3.0  # 재주차에서 허용할 총 후진 거리(m)
+    planner_time_limit: 10.0  # 한 번의 경로 탐색 시간 한도(초)
+    planner_max_expansions: 40000  # 한 번의 경로 탐색에서 확장할 최대 상태 수
+    primitive_length: 0.25  # 차량 운동 후보 한 단계의 이동 거리(m)
+    collision_substeps: 5  # 운동 후보 한 단계 안에서 검사할 충돌 표본 수
+    xy_resolution: 0.15  # 탐색 상태를 묶는 위치 격자 간격(m)
+    yaw_resolution_deg: 5.0  # 탐색 상태를 묶는 방향 격자 간격(도)
+    path_spacing: 0.05  # 최종 경로의 위치 표본 간격(m)
+    distance_cost: 1.0  # 주행 거리 비용 가중치
+    steering_cost: 0.35  # 조향 크기 비용 가중치
+    steering_change_cost: 0.50  # 조향 변화량 비용 가중치
+    reverse_cost: 1.7  # 후진 거리의 추가 비용 가중치
+    gear_change_cost: 2.0  # 전후진 전환 비용 가중치
+    obstacle_cost: 1.5  # 장애물 근접 비용 가중치

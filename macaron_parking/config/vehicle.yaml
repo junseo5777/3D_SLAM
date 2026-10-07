@@ -1,0 +1,11 @@
+# 파라미터 이름은 ROS 인터페이스와 연결되므로 그대로 사용합니다.
+/**:
+  ros__parameters:
+    wheel_base: 0.75  # 앞뒤 바퀴 축 사이 거리(m)
+    vehicle_width: 0.68  # 차체 전체 폭(m)
+    vehicle_length: 1.30  # 차체 전체 길이(m)
+    rear_overhang: 0.24  # 후륜축에서 뒤 범퍼까지 거리(m)
+    vehicle_height: 0.50  # 지면에서 차량 최고점까지 높이(m)
+    base_height: 0.14  # 지면에서 후륜축 중심까지 높이(m)
+    max_steer_deg: 21.0  # 계획과 추종에 공통 적용하는 조향 한계(도)
+    collision_margin: 0.12  # 차체 바깥에 추가하는 충돌 여유(m)
