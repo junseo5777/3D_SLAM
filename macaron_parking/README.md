@@ -40,6 +40,20 @@ PCD는 ASCII와 binary를 지원합니다(현재 map_builder가 저장하는 bin
 `binary_compressed`는 지원하지 않습니다. KD-tree는 XY 공간 검색을 하고,
 각 후보 주변의 실제 XYZ 점을 지면 상대 높이로 필터링한 뒤 전체 사각 footprint와 검사합니다.
 상태는 `(x,y,yaw)`이며 primitive 중간과 연결 경로도 검사합니다.
+
+`map_prefilter: true`가 기본입니다. PCD를 로딩할 때 원본 점으로 지면 높이를 미리 계산하고,
+확실한 바닥·상부 점을 제외한 **주차 충돌 전용 점군과 KD-tree**를 메모리에 만듭니다.
+원본 PCD 파일에 쓰거나 기존 Localization 입력을 바꾸지 않습니다. `/parking/map`도
+원본 점을 표시하며, 전처리한 점은 `/parking/collision_map`으로 별도 표시합니다.
+터미널에는 원본·충돌 후보·제외 점 수와 전처리 시간을 출력합니다.
+
+평지 방식은 지면 대비 8~55cm의 점만 남깁니다(현재 차량·높이 설정 기준).
+지역 지면 방식은 주변 차량 위치에서 충돌 가능성이 없는 점만 제거합니다. 경사·단차에서는
+점 자체의 지면 높이만 보고 지우면 장애물을 놓칠 수 있어 주변 지면 높이 범위를 함께 봅니다.
+불확실한 점은 보존하고, 남은 점에 대한 후보 자세별 높이 검사도 유지합니다.
+전처리는 지도 로딩 시 한 번 수행하며, 탐색 중에는 미리 계산한 지면 높이와 줄어든 점군을 사용합니다.
+`map_prefilter: false`는 전처리 전 판정과 비교할 때 사용할 수 있습니다.
+
 local ground는 주변 점의 낮은 높이 분위수 근사입니다. 지면이 관측되지 않은 영역은
 막고, 경사/낮은 구조물/다층 환경에는 실제 지도로 별도 검증해야 합니다.
 flat 모드는 지도별로 측정한 `ground_z`를 사용합니다. map의 z=0을 지면으로 가정하지 않습니다.
@@ -65,6 +79,8 @@ ros2 launch macaron_parking planning_preview.launch.py
 
 이 명령은 PCD 지도와 경로 표시가 설정된 RViz를 함께 실행합니다. 센서와 NDT 입력 없이도
 동작하며 차량 출력 변환 노드·JOY·Arduino 연결은 실행하지 않습니다.
+회색은 원본 지도, 주황색 **주차 검사 장애물**은 전처리된 충돌 후보입니다.
+전처리 점군만 보려면 Displays에서 **저장 PCD 지도** 표시를 끕니다.
 
 1. `2D Pose Estimate`로 시작 후륜축 중심과 차체 방향을 지정합니다(`/initialpose`).
 2. `2D Goal Pose`로 목표 후륜축 중심과 차체 방향을 지정합니다(`/goal_pose`).
@@ -80,7 +96,7 @@ ros2 launch macaron_parking planning_preview.launch.py
 PCD 충돌 검사는 그대로 적용하므로 차체가 장애물·지도 바깥에 있거나 가능한 경로가 없으면
 계획이 실패하며 `/parking/status`와 터미널에 이유를 표시합니다.
 `time limit reached`는 지정된 시간 안에 경로를 찾지 못했다는 뜻이며, 경로가 없다는
-증명은 아닙니다. 기본 시간 한도는 `config/parking.yaml`의 `planner_time_limit: 10.0`입니다.
+증명은 아닙니다. 기본 시간 한도는 `config/parking.yaml`의 `planner_time_limit: 20.0`입니다.
 시작점 자체는 자유 공간이어도 차체 방향과 앞뒤 범퍼·안전 여유까지 고려하면 충돌할 수 있습니다.
 
 이미 RViz가 켜져 있다면 `rviz:=false`를 사용합니다. 해당 RViz에서 Fixed Frame은 `map`,
@@ -151,6 +167,7 @@ ros2 run macaron_parking parking_plan \
 | `/parking/path` | nav_msgs/Path, map의 차체 pose |
 | `/parking/directions` | Int8MultiArray, +1/-1; layout.label에 plan_id |
 | `/parking/map` | PointCloud2, 읽은 원본 PCD |
+| `/parking/collision_map` | PointCloud2, 로딩 시 바닥·상부 전처리 후 남은 충돌 후보 |
 | `/parking/local_path`, `/parking/footprint` | RViz 추종/차체 표시 |
 | `/parking/desired_command` | AckermannDriveStamped, speed=m/s, steering_angle=rad |
 | `/parking/status` | String, state/plan_id/retry_count/reason |

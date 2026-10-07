@@ -36,9 +36,16 @@ class ParkingNode(Node):
         self.vehicle = vehicle_from(c)
         if c['control_rate'] <= 0 or c['min_cloud_points'] < 1:
             raise ValueError('invalid control rate/cloud size')
+        self.get_logger().info('PCD를 읽고 주차 충돌 검사 자료를 준비합니다.')
         self.map = CloudMap(load_pcd(c['map_path']), self.vehicle,
                             c['ground_mode'], c['ground_z'], c['ground_radius'],
-                            c['ground_percentile'], c['min_ground_points'], c['obstacle_min_height'])
+                            c['ground_percentile'], c['min_ground_points'], c['obstacle_min_height'],
+                            prefilter=c['map_prefilter'])
+        self.get_logger().info(f'주차 지도 준비 완료: 원본 {len(self.map.points)}점 → '
+                               f'충돌 후보 {len(self.map.collision_points)}점, '
+                               f'바닥 제외 {self.map.removed_below}점, '
+                               f'상부 제외 {self.map.removed_above}점, '
+                               f'전처리 {self.map.prefilter_elapsed:.2f}초')
         self.planner = HybridAStar(self.map)
         configure_planner(self.planner, c)
         self.session = ParkingSession(
@@ -64,6 +71,7 @@ class ParkingNode(Node):
         self.path_pub = self.create_publisher(Path, '/parking/path', latched)
         self.directions_pub = self.create_publisher(Int8MultiArray, '/parking/directions', latched)
         self.map_pub = self.create_publisher(PointCloud2, '/parking/map', latched)
+        self.collision_map_pub = self.create_publisher(PointCloud2, '/parking/collision_map', latched)
         self.local_path_pub = self.create_publisher(Path, '/parking/local_path', 1)
         self.footprint_pub = self.create_publisher(Marker, '/parking/footprint', 1)
         self.command_pub = self.create_publisher(AckermannDriveStamped, '/parking/desired_command', 1)
@@ -84,6 +92,8 @@ class ParkingNode(Node):
         self.create_timer(1.0 / c['control_rate'], self.tick)
         header = Header(frame_id=c['map_frame'], stamp=self.get_clock().now().to_msg())
         self.map_pub.publish(point_cloud2.create_cloud_xyz32(header, self.map.points.tolist()))
+        self.collision_map_pub.publish(point_cloud2.create_cloud_xyz32(header,
+                                                                      self.map.collision_points.tolist()))
         self.publish_path()
         self.get_logger().info('PCD parking ready; output is physical intent only. '
                                f'Length={self.vehicle.length}, width={self.vehicle.width}, '

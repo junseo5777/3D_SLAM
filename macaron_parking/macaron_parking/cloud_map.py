@@ -1,8 +1,11 @@
 """PCD의 XYZ 점을 직접 사용하여 후보 차량 위치의 충돌을 검사합니다."""
 
 import math
+import time
+from itertools import chain
 from pathlib import Path
 import numpy as np
+from scipy.ndimage import minimum_filter, maximum_filter
 from scipy.spatial import cKDTree
 from .vehicle import footprint_clearance
 
@@ -71,7 +74,7 @@ def load_pcd(filename):
 class CloudMap:
     def __init__(self, points, vehicle, ground_mode='local', ground_z=-0.88,
                  ground_radius=1.0, ground_percentile=15.0, min_ground_points=5,
-                 obstacle_min_height=0.08, safe_distance=0.30, bounds=None):
+                 obstacle_min_height=0.08, safe_distance=0.30, bounds=None, prefilter=True):
         self.points = np.asarray(points, dtype=float).reshape(-1, 3)
         self.points = self.points[np.isfinite(self.points).all(axis=1)]
         if not len(self.points):
@@ -83,7 +86,8 @@ class CloudMap:
                 or safe_distance < 0):
             raise ValueError('invalid ground/collision settings')
         self.vehicle = vehicle
-        self.tree = cKDTree(self.points[:, :2])
+        # 원본 점은 지면 추정·지도 범위·시각화용으로 보관하며 파일에는 쓰지 않습니다.
+        self._ground_tree = cKDTree(self.points[:, :2])
         self.ground_mode = ground_mode
         self.ground_z = ground_z
         self.ground_radius = ground_radius
@@ -100,13 +104,134 @@ class CloudMap:
                 or self.bounds[0] >= self.bounds[1] or self.bounds[2] >= self.bounds[3]):
             raise ValueError('map bounds must be [xmin,xmax,ymin,ymax]')
         self._ground_cache = {}
+        self._ground_resolution = 0.10  # 기존 지면 추정의 위치 격자 간격(m)
+        self._tile_cells = 32  # 빈 지도 영역에 큰 배열을 만들지 않는 타일 한 변의 격자 수
+        self._ground_tiles = None
+        self.prefilter_enabled = bool(prefilter)
+        self.removed_below = self.removed_above = 0
+        started = time.monotonic()
+        self.collision_points = self._prefilter_points() if prefilter else self.points
+        self.prefilter_elapsed = time.monotonic() - started
+        # Hybrid A*는 바닥·상부 점을 제외한 별도 검색 구조만 조회합니다.
+        self.tree = cKDTree(self.collision_points[:, :2])
+
+    def _search_radius(self):
+        return (math.hypot(self.vehicle.length / 2, self.vehicle.width / 2)
+                + self.vehicle.margin + self.safe_distance)
+
+    def _prefilter_points(self):
+        """충돌에 사용될 수 없는 점을 지도 로딩 시 한 번 제외합니다."""
+        z = self.points[:, 2]
+        if self.ground_mode == 'flat':
+            height = z - self.ground_z
+            below = height < self.obstacle_min_height
+            above = height > self.vehicle.height + 0.05
+        else:
+            resolution, cells = self._ground_resolution, self._tile_cells
+            point_keys = np.rint(self.points[:, :2] / resolution).astype(np.int64)
+            point_tiles, labels = np.unique(point_keys // cells, axis=0, return_inverse=True)
+            offset = abs(self.vehicle.front_extent - self.vehicle.rear_overhang) / 2
+            # 검색 원 중심의 후륜축 오프셋과 위치 반올림 오차까지 포함합니다.
+            reach = self._search_radius() + offset + math.sqrt(2) * resolution
+            padding = int(math.ceil(reach / resolution))
+            self._prepare_ground_tiles(point_tiles, reach)
+            below, above = np.zeros(len(z), dtype=bool), np.zeros(len(z), dtype=bool)
+            for index, tile in enumerate(point_tiles):
+                selected = np.flatnonzero(labels == index)
+                low, high = self._ground_envelope(tile, padding)
+                local = point_keys[selected] % cells
+                low, high = low[local[:, 0], local[:, 1]], high[local[:, 0], local[:, 1]]
+                known = np.isfinite(low) & np.isfinite(high)
+                # 경사에서는 가능한 모든 주변 차량 지면 높이에 대해 범위 밖인 점만 제거합니다.
+                # 지면을 알 수 없는 점은 보존하고 기존 unknown-ground 차단도 유지합니다.
+                lower = np.nextafter(low + self.obstacle_min_height, -math.inf)
+                upper = np.nextafter(high + (self.vehicle.height + 0.05), math.inf)
+                below[selected] = known & (z[selected] < lower)
+                above[selected] = known & (z[selected] > upper)
+        self.removed_below, self.removed_above = int(below.sum()), int(above.sum())
+        return self.points[~(below | above)]
+
+    def _prepare_ground_tiles(self, point_tiles, reach):
+        """원본 점으로 지면 높이를 미리 계산하며 점이 없는 넓은 영역은 저장하지 않습니다."""
+        resolution, cells = self._ground_resolution, self._tile_cells
+        span = int(math.ceil(max(reach, self.ground_radius + math.sqrt(2) * resolution)
+                             / (resolution * cells)))
+        tiles = np.unique(np.concatenate([point_tiles + [dx, dy]
+                                          for dx in range(-span, span + 1)
+                                          for dy in range(-span, span + 1)]), axis=0)
+        centers = (tiles * cells + (cells - 1) / 2) * resolution
+        radius = self.ground_radius + math.sqrt(2) * cells * resolution / 2
+        counts = self._ground_tree.query_ball_point(centers, radius, return_length=True)
+        tiles = tiles[counts >= self.min_ground_points]
+        ix, iy = np.meshgrid(np.arange(cells), np.arange(cells), indexing='ij')
+        local_keys = np.column_stack((ix.ravel(), iy.ravel()))
+        self._ground_tiles = {}
+        for tx, ty in tiles:
+            centers = (local_keys + [tx * cells, ty * cells]) * resolution
+            height = self._calculate_ground(centers).reshape(cells, cells)
+            if np.isfinite(height).any():
+                self._ground_tiles[(int(tx), int(ty))] = height
+
+    def _calculate_ground(self, centers):
+        """점군을 묶어 검색하고 기존 지면 분위수와 동일한 선형 보간을 계산합니다."""
+        result = np.full(len(centers), math.nan)
+        for begin in range(0, len(centers), 256):
+            indices = self._ground_tree.query_ball_point(centers[begin:begin + 256],
+                                                        self.ground_radius, return_sorted=False)
+            counts = np.fromiter((len(items) for items in indices), dtype=int, count=len(indices))
+            valid = np.flatnonzero(counts >= self.min_ground_points)
+            if not len(valid):
+                continue
+            counts, indices = counts[valid], indices[valid]
+            owners = np.repeat(np.arange(len(valid)), counts)
+            offsets = np.cumsum(counts) - counts
+            columns = np.arange(counts.sum()) - np.repeat(offsets, counts)
+            samples = np.full((len(valid), counts.max()), math.inf)
+            point_indices = np.fromiter(chain.from_iterable(indices), dtype=np.int64,
+                                        count=int(counts.sum()))
+            samples[owners, columns] = self.points[point_indices, 2]
+            samples.sort(axis=1)
+            rank = (counts - 1) * (self.ground_percentile / 100.)
+            lower = np.floor(rank).astype(int)
+            upper = np.minimum(lower + 1, counts - 1)
+            a, b = samples[np.arange(len(valid)), lower], samples[np.arange(len(valid)), upper]
+            fraction, delta = rank - lower, b - a
+            heights = np.where(fraction >= .5, b - delta * (1 - fraction), a + delta * fraction)
+            result[begin + valid] = heights
+        return result
+
+    def _ground_envelope(self, tile, padding):
+        """각 점을 조회할 수 있는 주변 차량 위치의 지면 높이 범위를 보수적으로 구합니다."""
+        cells = self._tile_cells
+        span = int(math.ceil(padding / cells))
+        side = (2 * span + 1) * cells
+        heights = np.full((side, side), math.nan)
+        for dx in range(-span, span + 1):
+            for dy in range(-span, span + 1):
+                values = self._ground_tiles.get((int(tile[0] + dx), int(tile[1] + dy)))
+                if values is not None:
+                    x, y = (dx + span) * cells, (dy + span) * cells
+                    heights[x:x + cells, y:y + cells] = values
+        known = np.isfinite(heights)
+        low = minimum_filter(np.where(known, heights, math.inf), size=2 * padding + 1,
+                             mode='constant', cval=math.inf)
+        high = maximum_filter(np.where(known, heights, -math.inf), size=2 * padding + 1,
+                              mode='constant', cval=-math.inf)
+        begin = span * cells
+        region = np.s_[begin:begin + cells, begin:begin + cells]
+        return low[region], high[region]
 
     def ground_at(self, x, y):
         if self.ground_mode == 'flat':
             return self.ground_z
-        key = (round(x / 0.10), round(y / 0.10))
+        key = (round(x / self._ground_resolution), round(y / self._ground_resolution))
+        if self._ground_tiles is not None:
+            cells = self._tile_cells
+            height = self._ground_tiles.get((key[0] // cells, key[1] // cells))
+            return float(height[key[0] % cells, key[1] % cells]) if height is not None else math.nan
         if key not in self._ground_cache:
-            indices = self.tree.query_ball_point(np.array(key) * 0.10, self.ground_radius)
+            indices = self._ground_tree.query_ball_point(np.array(key) * self._ground_resolution,
+                                                        self.ground_radius)
             height = (float(np.percentile(self.points[indices, 2], self.ground_percentile))
                       if len(indices) >= self.min_ground_points else math.nan)
             if len(self._ground_cache) >= 200000:
@@ -128,10 +253,9 @@ class CloudMap:
             return -math.inf
         offset = (self.vehicle.front_extent - self.vehicle.rear_overhang) / 2
         center = [x + offset * math.cos(yaw), y + offset * math.sin(yaw)]
-        radius = (math.hypot(self.vehicle.length / 2, self.vehicle.width / 2)
-                  + self.vehicle.margin + self.safe_distance)
+        radius = self._search_radius()
         indices = self.tree.query_ball_point(center, radius)
-        nearby = self.points[indices]
+        nearby = self.collision_points[indices]
         relative_z = nearby[:, 2] - ground
         obstacles = nearby[(relative_z >= self.obstacle_min_height)
                            & (relative_z <= self.vehicle.height + 0.05), :2]
@@ -175,13 +299,14 @@ class CloudMap:
         c, s = np.cos(yaw), np.sin(yaw)
         offset = (vehicle.front_extent - vehicle.rear_overhang) / 2
         centers = np.column_stack((x + offset * c, y + offset * s))
-        radius = math.hypot(vehicle.length / 2, vehicle.width / 2) + vehicle.margin + self.safe_distance
+        radius = self._search_radius()
         indices = self.tree.query_ball_point(centers, radius)
         counts = np.fromiter((len(items) for items in indices), dtype=int, count=len(valid))
         clearance = np.full(len(valid), math.inf)
         if counts.sum():
             owners = np.repeat(np.arange(len(valid)), counts)
-            points = self.points[np.concatenate(indices).astype(int)]
+            points = self.collision_points[np.fromiter(chain.from_iterable(indices), dtype=np.int64,
+                                                       count=int(counts.sum()))]
             height = points[:, 2] - ground[owners]
             obstacle = ((height >= self.obstacle_min_height) & (height <= vehicle.height + 0.05))
             owners, points = owners[obstacle], points[obstacle]

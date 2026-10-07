@@ -40,6 +40,7 @@ DEFAULTS = {
     'ground_radius': 1.0,  # 주변 지면 높이를 찾는 수평 검색 반경(m)
     'ground_percentile': 15.0,  # 주변 점 높이의 지면 추정 분위수(%)
     'min_ground_points': 5,  # 주변 지면 높이를 추정할 최소 점 개수
+    'map_prefilter': True,  # 지도 로딩 시 주차 검사 전용 점군에서 확실한 바닥·상부 점을 제거
     'obstacle_min_height': 0.08,  # 지면 대비 이 높이 이상의 점을 장애물로 사용(m)
     'obstacle_max_range': 4.0,  # 실시간 장애물 검색의 최대 수평 거리(m)
     'min_cloud_points': 20,  # 유효 점군으로 인정할 최소 원시 점 개수
@@ -57,7 +58,7 @@ DEFAULTS = {
     'enable_retry': False,  # 최종 주차 오차가 클 때 한 번만 재주차할지 여부
     'retry_min_forward': 0.4,  # 재주차에서 후진 전에 반드시 전진할 최소 거리(m)
     'retry_max_reverse': 3.0,  # 재주차에서 허용할 총 후진 거리(m)
-    'planner_time_limit': 10.0,  # 한 번의 경로 탐색 시간 한도(초)
+    'planner_time_limit': 20.0,  # 한 번의 경로 탐색 시간 한도(초)
     'planner_max_expansions': 40000,  # 한 번의 경로 탐색에서 확장할 최대 상태 수
     'primitive_length': 0.25,  # 차량 운동 후보 한 단계의 이동 거리(m)
     'collision_substeps': 5,  # 운동 후보 한 단계 안에서 검사할 충돌 표본 수
@@ -115,6 +116,7 @@ DESCRIPTIONS = {
     'ground_radius': '주변 지면 높이를 찾는 수평 검색 반경(m)',
     'ground_percentile': '주변 점 높이의 지면 추정 분위수(%)',
     'min_ground_points': '주변 지면 높이를 추정할 최소 점 개수',
+    'map_prefilter': '지도 로딩 시 주차 검사 전용 점군에서 확실한 바닥·상부 점을 제거',
     'obstacle_min_height': '지면 대비 이 높이 이상의 점을 장애물로 사용(m)',
     'obstacle_max_range': '실시간 장애물 검색의 최대 수평 거리(m)',
     'min_cloud_points': '유효 점군으로 인정할 최소 원시 점 개수',

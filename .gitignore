@@ -1,0 +1,9 @@
+# Python 실행 캐시와 테스트 임시 파일
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ROS 빌드 결과와 실행 로그
+build/
+install/
+log/

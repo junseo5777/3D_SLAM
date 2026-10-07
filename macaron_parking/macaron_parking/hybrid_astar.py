@@ -316,7 +316,7 @@ class HybridAStar:
         # 탐색 제어.
         self.heuristic_weight = 1.4     # >1이면 weighted A*, 빠르지만 준최적
         self.max_expansions = 40000     # 확장 상한
-        self.time_limit = 10.0          # 탐색 시간 상한(s)
+        self.time_limit = 20.0          # 탐색 시간 상한(s)
 
         # 클로소이드 연결.
         self.connect_interval = 5       # 몇 번 확장마다 반대편 루트로 쏴볼지

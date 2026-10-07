@@ -1,81 +1,198 @@
-# 경로 확인 모드용 화면: 시작 자세와 목표 자세를 지정하면 저장 지도에 경로를 표시합니다.
 Panels:
-  - Class: rviz_common/Displays  # 지도·경로 표시 목록 패널
-    Name: Displays  # 패널 이름
-  - Class: rviz_common/Tool Properties  # 초기·목표 입력 토픽 설정 패널
-    Name: Tool Properties  # 패널 이름
-  - Class: rviz_common/Views  # 카메라 보기 설정 패널
-    Name: Views  # 패널 이름
+  - Class: rviz_common/Displays
+    Help Height: 138
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+    Tree Height: 762
+  - Class: rviz_common/Tool Properties
+    Expanded: ~
+    Name: Tool Properties
+    Splitter Ratio: 0.5
+  - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
 Visualization Manager:
-  Class: ""  # 기본 시각화 관리자
-  Enabled: true  # 화면 표시 활성화
-  Name: root  # 시각화 관리자 이름
-  Global Options:
-    Fixed Frame: map  # 모든 지도·경로의 기준 좌표계
-    Background Color: 35; 35; 35  # 배경색(R·G·B)
-    Frame Rate: 30  # 화면 갱신 주기(Hz)
+  Class: ""
   Displays:
-    - Class: rviz_default_plugins/PointCloud2  # 저장 PCD 지도 표시
-      Name: 저장 PCD 지도  # 화면에 보이는 표시 이름
-      Enabled: true  # 지도 표시 활성화
-      Alpha: 0.65  # 점군 불투명도(0~1)
-      Color: 170; 170; 170  # 지도 점 색상(R·G·B)
-      Color Transformer: FlatColor  # 점 높이와 무관한 단색 표시
-      Position Transformer: XYZ  # XYZ 필드를 점 위치로 사용
-      Style: Points  # 개별 점으로 표시
-      Size (Pixels): 2  # 화면 점 크기(픽셀)
-      Decay Time: 0  # 저장 지도 표시 유지 시간(0: 다음 지도까지 유지)
+    - Alpha: 0.6499999761581421
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 170; 170; 170
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: 저장 PCD 지도
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 2
+      Size (m): 0.009999999776482582
+      Style: Points
       Topic:
-        Value: /parking/map  # 새 주차 노드가 발행하는 원본 지도 토픽
-        Depth: 1  # 보관할 지도 메시지 수
-        History Policy: Keep Last  # 최신 지도만 유지
-        Reliability Policy: Reliable  # 지도 메시지의 신뢰 전송 사용
-        Durability Policy: Transient Local  # 늦게 연결되어도 저장된 지도 수신
-    - Class: rviz_default_plugins/Path  # 생성된 주차 경로 표시
-      Name: 주차 경로  # 화면에 보이는 표시 이름
-      Enabled: true  # 경로 표시 활성화
-      Color: 30; 255; 100  # 경로 색상(R·G·B)
-      Alpha: 1  # 경로 불투명도(0~1)
-      Line Style: Billboards  # 두께가 보이는 선으로 표시
-      Line Width: 0.04  # 경로 선 두께(m)
-      Buffer Length: 1  # 최신 경로 하나만 표시
-      Pose Style: None  # 표본마다 좌표축 표시 생략
+        Depth: 1
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /parking/map
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 110; 60
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: 주차 검사 장애물
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Points
       Topic:
-        Value: /parking/path  # Hybrid A*가 생성한 경로 토픽
-        Depth: 1  # 보관할 경로 메시지 수
-        History Policy: Keep Last  # 최신 경로만 유지
-        Reliability Policy: Reliable  # 경로 메시지의 신뢰 전송 사용
-        Durability Policy: Transient Local  # 늦게 연결되어도 생성된 경로 수신
-    - Class: rviz_default_plugins/Marker  # 선택한 시작 자세의 차량 충돌 영역 표시
-      Name: 시작 차량 영역  # 화면에 보이는 표시 이름
-      Enabled: true  # 차량 사각형 표시 활성화
+        Depth: 1
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /parking/collision_map
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 30; 255; 100
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Billboards
+      Line Width: 0.03999999910593033
+      Name: 주차 경로
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
       Topic:
-        Value: /parking/footprint  # 차체와 충돌 여유의 사각형 토픽
-        Depth: 1  # 보관할 차량 표시 메시지 수
-        History Policy: Keep Last  # 최신 차량 표시만 유지
-        Reliability Policy: Reliable  # 차량 표시 메시지의 신뢰 전송 사용
-        Durability Policy: Volatile  # 현재 주기의 차량 표시 수신
+        Depth: 1
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /parking/path
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: 시작 차량 영역
+      Namespaces:
+        {}
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /parking/footprint
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 35; 35; 35
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
   Tools:
-    - Class: rviz_default_plugins/Interact  # 표시 객체 조작 도구
-    - Class: rviz_default_plugins/MoveCamera  # 지도 화면 이동 도구
-    - Class: rviz_default_plugins/Select  # 지도 점 선택 도구
-    - Class: rviz_default_plugins/SetInitialPose  # 2D Pose Estimate로 시작 위치·차체 방향 지정
-      Topic: /initialpose  # 경로 확인 모드의 수동 시작 자세 토픽
-    - Class: rviz_default_plugins/SetGoal  # 2D Goal Pose로 목표 위치·차체 방향 지정
-      Topic: /goal_pose  # 경로 확인 모드의 목표 자세 토픽
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/SetInitialPose
+      Covariance x: 0.25
+      Covariance y: 0.25
+      Covariance yaw: 0.06853891909122467
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
   Views:
     Current:
-      Class: rviz_default_plugins/TopDownOrtho  # 위에서 내려다보는 직교 화면
-      Name: Current View  # 현재 카메라 보기 이름
-      Target Frame: <Fixed Frame>  # 지도 기준으로 카메라 고정
-      Angle: 0  # 화면 회전각(rad)
-      Scale: 35  # 지도 1m당 화면 크기(픽셀)
-      X: 0  # 화면 중심의 지도 X 위치(m)
-      Y: 0  # 화면 중심의 지도 Y 위치(m)
-      Near Clip Distance: 0.01  # 카메라의 최소 표시 거리(m)
-    Saved: ~  # 저장된 추가 카메라 보기 없음
+      Class: rviz_default_plugins/ThirdPersonFollower
+      Distance: 100
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 1.5697963237762451
+      Target Frame: <Fixed Frame>
+      Value: ThirdPersonFollower (rviz_default_plugins)
+      Yaw: -1.5707963705062866
+    Saved: ~
 Window Geometry:
-  Width: 1200  # RViz 창 너비(픽셀)
-  Height: 800  # RViz 창 높이(픽셀)
-  Hide Left Dock: false  # 지도·경로 목록 패널 표시
-  Hide Right Dock: false  # 도구·카메라 설정 패널 표시
+  Displays:
+    collapsed: false
+  Height: 1672
+  Hide Left Dock: false
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd000000010000000000000316000005ecfc0200000003fb000000100044006900730070006c006100790073010000006e000003f20000018200fffffffb0000001e0054006f006f006c002000500072006f0070006500720074006900650073010000046c000000b0000000b000fffffffb0000000a005600690065007700730100000528000001320000013200ffffff00000792000005ec00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Tool Properties:
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 2740
+  X: 140
+  Y: 54

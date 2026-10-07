@@ -42,7 +42,7 @@ def main(argv=None):
     vehicle = vehicle_from(config)
     cloud_map = CloudMap(load_pcd(args.map), vehicle, config['ground_mode'], config['ground_z'],
                          config['ground_radius'], config['ground_percentile'], config['min_ground_points'],
-                         config['obstacle_min_height'])
+                         config['obstacle_min_height'], prefilter=config['map_prefilter'])
     planner = HybridAStar(cloud_map)
     configure_planner(planner, config)
     result = (plan_retry(planner, args.start, args.goal, config['retry_min_forward'], config['retry_max_reverse'])
